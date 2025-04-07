@@ -23,9 +23,11 @@ import {
     parseArguments,
 } from "./config/index.ts";
 import {initializeDatabase} from "./database/index.ts";
-import { summaryAction } from "./action/summary.ts";
+import { allGroupSummaryAction, summaryAction } from "./action/summary.ts";
 import { banAction } from "./action/ban.ts";
-import { mentionAction } from "./action/mention.ts";
+import { autoMention, mentionAction } from "./action/mention.ts";
+import { checkMentionTimeouts } from "./action/utils.ts";
+import { memberReportAction } from "./action/memberReport.ts";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -65,7 +67,7 @@ export function createAgent(
             character.settings?.secrets?.WALLET_PUBLIC_KEY ? solanaPlugin : null,
         ].filter(Boolean),
         providers: [],
-        actions: [banAction,summaryAction, mentionAction],
+        actions: [banAction, summaryAction, mentionAction, allGroupSummaryAction, autoMention, memberReportAction],
         services: [],
         managers: [],
         cacheManager: cache,
@@ -96,6 +98,14 @@ async function startAgent(character: Character, directClient: DirectClient) {
         runtime.clients = await initializeClients(character, runtime);
 
         directClient.registerAgent(runtime);
+
+        const checkInterval = setInterval(async () => {
+            try {
+                await checkMentionTimeouts(await runtime.clients[0].bot);
+            } catch (error) {
+                elizaLogger.error('Error in mention timeout check:', error);
+            }
+        }, 30 * 1000);
 
         // report to console
         elizaLogger.debug(`Started ${character.name} as ${runtime.agentId}`);
