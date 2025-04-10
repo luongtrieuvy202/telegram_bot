@@ -92,6 +92,49 @@ export class TelegramClient {
     private setupMessageHandlers(): void {
         elizaLogger.log("Setting up message handler...");
 
+        // Add help command handler
+        this.bot.command('help', async (ctx) => {
+            const helpMessage = `🤖 *Eliza Bot Help*\n\n` +
+                `*Available Commands:*\n` +
+                `• /help - Show this help message\n` +
+                `• /start - Start interacting with the bot\n` +
+                `• /poll create @group_name "question" "option1" "option2" [option3] [option4] - Create a poll in a group\n` +
+                `• /poll results <poll_id> - View poll results\n` +
+                `• /poll close <poll_id> - Close a poll (creator only)\n` +
+                `• /poll list [@group_name] - List active polls\n` +
+                `• /send "group name" "message content" - Send a message to a group\n\n` +
+                `*How to Use:*\n` +
+                `• *Mentions:*\n` +
+                `  - I'll track people that mentions you in the group and notify if you forgot\n\n` +
+                `• *Polls:*\n` +
+                `  - Create polls with 2-4 options\n` +
+                `  - Polls expire after 24 hours\n` +
+                `  - Each user can vote once\n` +
+                `  - View results anytime\n\n` +
+                `• *Group Messages:*\n` +
+                `  - Send messages to groups you're a member of\n` +
+                `  - Format: /send "group name" "message content"\n` +
+                `  - Example: /send "Agentlauncher x Solana (project)" "Hello everyone!"\n\n` +
+                `• *Member Reports:*\n` +
+                `  - Ask "who joined today" to see new members for the day\n` +
+                `  - Ask "who joined this week" for weekly report\n` +
+                `  - Ask "who joined this month" for monthly report\n` +
+                `  - Reports show usernames and join times\n\n` +
+                `• *Summary group messages:*\n` +
+                `  - Ask "Did I miss any news today??\n` +
+                `  - Summary conversation of each groups and provide actions\n\n` +
+                `*Features:*\n` +
+                `• Natural conversation\n` +
+                `• Group chat support\n` +
+                `• Private messaging\n` +
+                `• Smart responses based on context\n` +
+                `• Poll creation and management\n` +
+                `• Cross-group messaging\n` +
+                `• Member activity tracking`;
+
+            await ctx.reply(helpMessage, { parse_mode: 'Markdown' });
+        });
+
         this.bot.on(message("new_chat_members"), async (ctx) => {
             try {
                 const newMembers = ctx.message.new_chat_members;
