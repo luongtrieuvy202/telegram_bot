@@ -1,3 +1,6 @@
+import { setDefaultResultOrder } from "node:dns";
+setDefaultResultOrder("ipv4first");
+
 import {DirectClient} from "@elizaos/client-direct";
 import {
     AgentRuntime,
