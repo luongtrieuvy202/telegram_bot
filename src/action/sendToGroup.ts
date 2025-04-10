@@ -72,7 +72,6 @@ export const sendToGroupAction: Action = {
                 }
             }
             
-            console.log(targetGroup)
             // Send the message to the group
             await bot.telegram.sendMessage(targetGroup.id, messageContent);
             

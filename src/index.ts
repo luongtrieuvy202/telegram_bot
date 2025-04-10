@@ -1,5 +1,5 @@
 import { setDefaultResultOrder } from "node:dns";
-setDefaultResultOrder("ipv4first");
+setDefaultResultOrder("ipv6first");
 
 import {DirectClient} from "@elizaos/client-direct";
 import {
@@ -32,6 +32,7 @@ import { autoMention, mentionAction } from "./action/mention.ts";
 import { checkMentionTimeouts } from "./action/utils.ts";
 import { memberReportAction } from "./action/memberReport.ts";
 import { pollAction } from "./action/poll.ts";
+import { sendToGroupAction } from "./action/sendToGroup.ts";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -79,6 +80,7 @@ export function createAgent(
             autoMention,
             memberReportAction,
             pollAction,
+            sendToGroupAction
         ],
         services: [],
         managers: [],
