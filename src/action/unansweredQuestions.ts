@@ -68,6 +68,19 @@ export const unansweredQuestionsAction: Action = {
         // Get messages from all groups
         const groupMessages = await getUserGroupMessages(ctx.message.from.id) as Record<string, GroupData>;
         
+        // Check if there are any messages
+        const hasMessages = Object.values(groupMessages).some(groupData => 
+            groupData.message && groupData.message.length > 0
+        );
+        
+        if (!hasMessages) {
+            await callback({
+                text: "You don't have any messages in your groups.",
+                action: "UNANSWERED_QUESTIONS"
+            });
+            return;
+        }
+        
         // Track messages that haven't been responded to
         const unrespondedMessages = [];
         
@@ -147,7 +160,7 @@ Instructions:
 Here are all the messages:
 ${messagesText}
 
-Provide a clean, organized list of only the meaningful messages that require follow-up, grouped by their respective groups.`;
+Provide a clean, organized list of only the meaningful messages that require follow-up, grouped by their respective groups. If there are no meaningful messages after filtering, simply state that there are no messages requiring follow-up.`;
 
         const summary = await generateText({
             runtime: runtime,

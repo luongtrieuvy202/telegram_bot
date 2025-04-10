@@ -33,19 +33,60 @@ export const allGroupSummaryAction: Action = {
     ): Promise<void> => {
         const ctx = options.ctx as Context<Update>
         const responses = await getUserGroupMessages(ctx.message.from.id)
-        console.log(generateHumanSummary(responses, ctx.message.from.username))
+        
+        // Check if there are any messages
+        const hasMessages = Object.values(responses).some(groupData => 
+            (groupData as any).message && (groupData as any).message.length > 0
+        );
+        
+        if (!hasMessages) {
+            await callback({
+                text: "You don't have any messages in your groups.",
+                action: "SUMMARY_GROUPS"
+            });
+            return;
+        }
+
+        const prompt = `🔍 *Unread Messages Summary*\n\n
+**Role**: You're a helpful Telegram assistant summarizing unread messages.
+
+Act as a Telegram assistant that summarizes my unread messages from today. Follow these rules:
+
+1. **Scan** all unread group chats and prioritize:
+   - Direct mentions (@me)
+   - Unanswered questions (to me or the group)
+   - Deadlines or action items
+   - Urgent/time-sensitive updates
+
+2. **Summarize** each active group in 1-2 lines. Skip inactive/noisy groups unless I'm mentioned.
+
+3. **Flag priorities** clearly:
+   - Use "[Action: ...]" for tasks (e.g., "[Action: Reply about budget]")
+   - Use "[Deadline: ...]" for time-sensitive items
+   - List all priorities under "**Priority Items**" at the end
+
+4. If nothing needs attention:
+   \`\`\`
+   No urgent items. Key updates: [Brief summary of notable discussions]
+   \`\`\`
+
+Keep tone natural and concise. Ignore spammy groups. Don't sound robotic. If there are no messages, simply state that there are no new messages today.
+
+Here are the messages:
+${generateHumanSummary(responses, ctx.message.from.username)}
+
+Provide a summary following these guidelines. If there are no messages, just say there are no new messages today.`;
+
         const text = await generateText({
             runtime: runtime,
-            context: generateHumanSummary(responses, ctx.message.from.username),
+            context: prompt,
             modelClass: ModelClass.SMALL
-        })
-        console.log(text)
+        });
 
         callback({
             text: text,
             action: "SUMMARY_GROUPS"
-        })
-
+        });
     },
     examples: []
 }
@@ -75,7 +116,7 @@ export const summaryAction: Action = {
             const messages = await redis.lrange(`group_messages:${groupId}`,0,-1)
             const parsedLastMessages = messages.map(msg => JSON.parse(msg));
             const paragraph = parsedLastMessages.map(msg => msg.text).join(" ");
-            const prompt = `SSummarize the following paragraph in three sentences. Remove any introductory phrases like 'Here is a summary' or 'The paragraph talks about.' The response should start directly with the summary content. Format it as: 'Here are the messages you haven’t read from the group: ...:\n\n${paragraph}`;
+            const prompt = `SSummarize the following paragraph in three sentences. Remove any introductory phrases like 'Here is a summary' or 'The paragraph talks about.' The response should start directly with the summary content. Format it as: 'Here are the messages you haven't read from the group: ...:\n\n${paragraph}`;
 
             const text = await generateText({
                 runtime: runtime,
