@@ -1378,7 +1378,7 @@ export class MessageManager {
                         telegramMessageHandlerTemplate,
                 });
 
-                const actionNames = ["SUMMARY_GROUPS", "MENTION_AUTO", "MENTION", "BAN", "MEMBER_REPORT", "POLL", "SEND_TO_GROUP", "DEFAULT"];
+                const actionNames = ["SUMMARY_GROUPS", "MENTION_AUTO", "MENTION", "BAN", "MEMBER_REPORT", "POLL", "SEND_TO_GROUP", "UNANSWERED_QUESTIONS"];
                 let handled = false;
 
                 for (let action of this.runtime.actions.filter(a => actionNames.includes(a.name))) {

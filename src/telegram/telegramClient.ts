@@ -122,6 +122,7 @@ export class TelegramClient {
                 `  - Reports show usernames and join times\n\n` +
                 `• *Summary group messages:*\n` +
                 `  - Ask "Did I miss any news today??\n` +
+                `  - Ask "Is there any messages that need follow up or pending or unanswered?\n` +
                 `  - Summary conversation of each groups and provide actions\n\n` +
                 `*Features:*\n` +
                 `• Natural conversation\n` +

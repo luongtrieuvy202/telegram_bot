@@ -34,6 +34,7 @@ import { memberReportAction } from "./action/memberReport.ts";
 import { pollAction } from "./action/poll.ts";
 import { sendToGroupAction } from "./action/sendToGroup.ts";
 import { defaultAction } from "./action/default.ts";
+import { unansweredQuestionsAction } from "./action/unansweredQuestions.ts";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -82,6 +83,7 @@ export function createAgent(
             memberReportAction,
             pollAction,
             sendToGroupAction,
+            unansweredQuestionsAction,
             defaultAction
         ],
         services: [],
