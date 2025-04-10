@@ -1378,7 +1378,7 @@ export class MessageManager {
                         telegramMessageHandlerTemplate,
                 });
 
-                const actionNames = ["SUMMARY_GROUPS", "MENTION_AUTO", "MENTION", "BAN", "MEMBER_REPORT"];
+                const actionNames = ["SUMMARY_GROUPS", "MENTION_AUTO", "MENTION", "BAN", "MEMBER_REPORT", "POLL"];
 
                 for (let action of this.runtime.actions.filter(a => actionNames.includes(a.name))) {
                     if (!action) continue;

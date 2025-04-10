@@ -7,6 +7,7 @@ import redis from "../redis/redis.ts";
 import {Update} from "telegraf/types";
 import {handleMention, markMentionsAsRead, trackMention} from "../action/utils.ts";
 import {trackNewMember} from "../action/memberReport.ts";
+import { handlePollCallback } from "../action/poll.ts";
 
 export class TelegramClient {
     private bot: Telegraf<Context>;
@@ -118,6 +119,8 @@ export class TelegramClient {
                 elizaLogger.error("Error handling new chat members:", error);
             }
         });
+
+        this.bot.on('callback_query', handlePollCallback);
 
         this.bot.on("my_chat_member", async (ctx) => {
             const update = ctx.update as Update.MyChatMemberUpdate;

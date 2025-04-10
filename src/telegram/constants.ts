@@ -35,3 +35,12 @@ export const TEAM_COORDINATION = {
         "update team",
     ],
 } as const;
+
+export const POLL_CONSTANTS = {
+    MAX_OPTIONS: 4,
+    MIN_OPTIONS: 2,
+    POLL_EXPIRY: 24 * 60 * 60, // 24 hours in seconds
+    VOTE_LIMIT: 1, // One vote per user
+    GROUP_POLL_PREFIX: "group_poll:",
+    DEFAULT_GROUP: "general",
+} as const;

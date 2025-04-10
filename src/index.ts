@@ -28,6 +28,7 @@ import { banAction } from "./action/ban.ts";
 import { autoMention, mentionAction } from "./action/mention.ts";
 import { checkMentionTimeouts } from "./action/utils.ts";
 import { memberReportAction } from "./action/memberReport.ts";
+import { pollAction } from "./action/poll.ts";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -67,7 +68,15 @@ export function createAgent(
             character.settings?.secrets?.WALLET_PUBLIC_KEY ? solanaPlugin : null,
         ].filter(Boolean),
         providers: [],
-        actions: [banAction, summaryAction, mentionAction, allGroupSummaryAction, autoMention, memberReportAction],
+        actions: [
+            banAction,
+            summaryAction,
+            mentionAction,
+            allGroupSummaryAction,
+            autoMention,
+            memberReportAction,
+            pollAction,
+        ],
         services: [],
         managers: [],
         cacheManager: cache,
