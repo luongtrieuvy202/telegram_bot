@@ -33,6 +33,7 @@ import { checkMentionTimeouts } from "./action/utils.ts";
 import { memberReportAction } from "./action/memberReport.ts";
 import { pollAction } from "./action/poll.ts";
 import { sendToGroupAction } from "./action/sendToGroup.ts";
+import { defaultAction } from "./action/default.ts";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -80,7 +81,8 @@ export function createAgent(
             autoMention,
             memberReportAction,
             pollAction,
-            sendToGroupAction
+            sendToGroupAction,
+            defaultAction
         ],
         services: [],
         managers: [],

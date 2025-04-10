@@ -1378,51 +1378,28 @@ export class MessageManager {
                         telegramMessageHandlerTemplate,
                 });
 
-                const actionNames = ["SUMMARY_GROUPS", "MENTION_AUTO", "MENTION", "BAN", "MEMBER_REPORT", "POLL", "SEND_TO_GROUP"];
+                const actionNames = ["SUMMARY_GROUPS", "MENTION_AUTO", "MENTION", "BAN", "MEMBER_REPORT", "POLL", "SEND_TO_GROUP", "DEFAULT"];
+                let handled = false;
 
                 for (let action of this.runtime.actions.filter(a => actionNames.includes(a.name))) {
                     if (!action) continue;
                 
                     const shouldHandle = await action.validate(this.runtime, memory, state);
                     if (shouldHandle) {
-                        action.handler(this.runtime, memory, state, { ctx }, callback);
+                        await action.handler(this.runtime, memory, state, { ctx }, callback);
+                        handled = true;
+                        // Don't break here to allow the default action to handle if no other action did
                     }
                 }
-                // const responseContent = await this._generateResponse(
-                //     memory,
-                //     state,
-                //     context
-                // );
 
-                // if (!responseContent || !responseContent.text) return;
-
-                // const action = this.runtime.actions.find((a) => a.name === responseContent.action);
-                // const shouldSuppressInitialMessage = action?.suppressInitialMessage;
-
-                // let responseMessages = [];
-
-                // if (!shouldSuppressInitialMessage) {
-                //     // Execute callback to send messages and log memories
-                //     responseMessages = await callback(responseContent);
-                // } else {
-                //     responseMessages = [
-                //         {
-                //             id: stringToUuid(messageId + "-" + this.runtime.agentId),
-                //             userId: this.runtime.agentId,
-                //             agentId: this.runtime.agentId,
-                //             content: responseContent,
-                //             roomId,
-                //             embedding: getEmbeddingZeroVector(),
-                //             createdAt: Date.now(),
-                //         }
-                //     ]
-                // }
-
-                // // Update state after response
-                // state = await this.runtime.updateRecentMessageState(state);
-                // Handle any resulting actions
+                // If no action handled the message, use the default action
+                if (!handled) {
+                    const defaultAction = this.runtime.actions.find(a => a.name === "DEFAULT");
+                    if (defaultAction) {
+                        await defaultAction.handler(this.runtime, memory, state, { ctx }, callback);
+                    }
+                }
             }
-
 
             await this.runtime.evaluate(memory, state, shouldRespond, callback);
         } catch (error) {
