@@ -5,8 +5,8 @@ import {
     State,
     HandlerCallback,
 } from "@elizaos/core";
-import { Context } from "telegraf";
-import { Update } from "telegraf/types";
+import {Context} from "telegraf";
+import {Update} from "telegraf/types";
 
 export const defaultAction: Action = {
     name: 'DEFAULT',
@@ -25,7 +25,7 @@ export const defaultAction: Action = {
         callback?: HandlerCallback
     ): Promise<void> => {
         const ctx = options.ctx as Context<Update>;
-        
+
         // Send a helpful default message
         await callback({
             text: "I don't understand your command. Please check /help for more information.",

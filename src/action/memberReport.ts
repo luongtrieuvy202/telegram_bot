@@ -1,7 +1,7 @@
-import { Action, IAgentRuntime, Memory, State, HandlerCallback, generateText, ModelClass } from "@elizaos/core";
+import {Action, IAgentRuntime, Memory, State, HandlerCallback, generateText, ModelClass} from "@elizaos/core";
 import redis from "../redis/redis.ts";
-import { Context } from "telegraf";
-import { Update } from "telegraf/types";
+import {Context} from "telegraf";
+import {Update} from "telegraf/types";
 
 // Redis key patterns:
 // group:{groupId}:new_members:{timestamp} -> hash containing member info
@@ -32,7 +32,7 @@ export async function trackNewMember(groupId: string, member: MemberInfo) {
 async function getMemberReport(groupId: string, startTime: number, endTime: number = Date.now()): Promise<MemberInfo[]> {
     const memberSetKey = `group:${groupId}:members`;
     const members = await redis.zrangebyscore(memberSetKey, startTime, endTime);
-    
+
     const pipeline = redis.pipeline();
     for (const memberId of members) {
         const memberKeys = await redis.keys(`group:${groupId}:new_members:*`);
@@ -40,7 +40,7 @@ async function getMemberReport(groupId: string, startTime: number, endTime: numb
             pipeline.hgetall(key);
         }
     }
-    
+
     const results = await pipeline.exec();
     return results
         .map(([err, data]) => data as MemberInfo)
@@ -51,16 +51,138 @@ async function getMemberReport(groupId: string, startTime: number, endTime: numb
         });
 }
 
-function generateReportText(members: MemberInfo[], period: string): string {
+function formatTimeAgo(timestamp: number): string {
+    const now = Date.now();
+    const diff = now - timestamp;
+    const minutes = Math.floor(diff / (1000 * 60));
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+}
+
+async function detectMemberReportIntent(runtime: IAgentRuntime, message: Memory): Promise<boolean> {
+    const intentPrompt = `You are a helpful Telegram group assistant. Your task is to understand if the user wants information about new group members.
+
+Analyze the following message and determine if the user is asking about new members. Consider:
+- Direct questions about new members
+- Questions about recent joiners
+- Requests for member information
+- Time-based queries (today, this week, this month)
+
+Message: "${message.content.text}"
+
+Respond with one of these exact phrases:
+- "YES" if the user is asking about new members
+- "NO" if they are not
+
+Only respond with YES or NO.`;
+
+    const response = await generateText({
+        runtime,
+        context: intentPrompt,
+        modelClass: ModelClass.SMALL
+    });
+
+    return response.trim().toUpperCase() === "YES";
+}
+
+async function extractTimePeriod(runtime: IAgentRuntime, message: Memory): Promise<{
+    startTime: number,
+    period: string
+}> {
+    const timePrompt = `Analyze the following message and determine the time period the user is interested in for new members.
+
+Message: "${message.content.text}"
+
+Consider these time periods:
+- "today" or "recently" -> last 24 hours
+- "this week" -> last 7 days
+- "this month" -> last 30 days
+- no specific time mentioned -> last 24 hours
+
+Respond with one of these exact phrases:
+- "DAY" for last 24 hours
+- "WEEK" for last 7 days
+- "MONTH" for last 30 days
+
+Only respond with DAY, WEEK, or MONTH.`;
+
+    const response = await generateText({
+        runtime,
+        context: timePrompt,
+        modelClass: ModelClass.SMALL
+    });
+
+    console.log(response)
+
+    const now = Date.now();
+    const DAY = 24 * 60 * 60 * 1000;
+    const WEEK = 7 * DAY;
+    const MONTH = 30 * DAY;
+
+    switch (response.trim().toUpperCase()) {
+        case "WEEK":
+            return {startTime: now - WEEK, period: "week"};
+        case "MONTH":
+            return {startTime: now - MONTH, period: "month"};
+        default:
+            return {startTime: now - DAY, period: "day"};
+    }
+}
+
+function generateMemberReportResponse(
+    members: MemberInfo[],
+    period: string
+): string {
     if (members.length === 0) {
-        return `No new members joined during this ${period}.`;
+        return `I don't see any new members who joined during this ${period}.`;
     }
 
-    const memberList = members
-        .map(m => `@${m.username || m.firstName}`)
-        .join(", ");
+    // Group members by time periods for better readability
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
+    const DAY = 24 * HOUR;
 
-    return `New members who joined during this ${period} (${members.length}): ${memberList}`;
+    const recentMembers = members.filter(m => now - m.joinedAt < HOUR);
+    const todayMembers = members.filter(m => now - m.joinedAt < DAY);
+    const olderMembers = members.filter(m => now - m.joinedAt >= DAY);
+
+    const formatMemberList = (memberList: MemberInfo[]) => {
+        return memberList
+            .map(m => `@${m.username || m.firstName} (joined ${formatTimeAgo(m.joinedAt)})`)
+            .join("\n");
+    };
+
+    const parts: string[] = [];
+
+    // Add welcoming message
+    parts.push(`Welcome to our new members! 👋`);
+
+    // Add recent members if any
+    if (recentMembers.length > 0) {
+        parts.push(`\nRecently joined (${recentMembers.length}):`);
+        parts.push(formatMemberList(recentMembers));
+    }
+
+    // Add today's members if any (excluding recent ones)
+    if (todayMembers.length > 0) {
+        parts.push(`\nJoined today (${todayMembers.length}):`);
+        parts.push(formatMemberList(todayMembers));
+    }
+
+    // Add older members if any
+    if (olderMembers.length > 0) {
+        parts.push(`\nJoined earlier (${olderMembers.length}):`);
+        parts.push(formatMemberList(olderMembers));
+    }
+
+    // Add total count
+    parts.push(`\nTotal new members: ${members.length}`);
+
+    return parts.join("\n");
 }
 
 export const memberReportAction: Action = {
@@ -68,10 +190,18 @@ export const memberReportAction: Action = {
     similes: [],
     description: "Generate reports about new group members",
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
-        const text = message.content.text.toLowerCase();
-        return text.includes("new members") || 
-               text.includes("member report") ||
-               text.includes("who joined");
+        if (!state.handle) return false
+        await runtime.messageManager.createMemory({
+            content: {
+                text: message.content.text
+            },
+            roomId: message.roomId,
+            userId: message.userId,
+            agentId: message.agentId
+        });
+
+        const isMemberReport = await detectMemberReportIntent(runtime, message);
+        return isMemberReport;
     },
     suppressInitialMessage: true,
     handler: async (
@@ -81,33 +211,22 @@ export const memberReportAction: Action = {
         options?: any,
         callback?: HandlerCallback
     ): Promise<void> => {
-        const ctx = options.ctx as Context<Update>;
-        const text = message.content.text.toLowerCase();
-        const groupId = ctx.chat.id.toString();
-        
-        const now = Date.now();
-        const DAY = 24 * 60 * 60 * 1000;
-        const WEEK = 7 * DAY;
-        const MONTH = 30 * DAY;
+        try {
+            const ctx = options.ctx as Context<Update>;
+            const groupId = ctx.chat.id.toString();
 
-        let startTime = now - DAY; // Default to daily report
-        let period = "day";
+            const {startTime, period} = await extractTimePeriod(runtime, message);
+            console.log(startTime, period)
+            const members = await getMemberReport(groupId, startTime);
+            const reportText = generateMemberReportResponse(members, period);
 
-        if (text.includes("weekly") || text.includes("week")) {
-            startTime = now - WEEK;
-            period = "week";
-        } else if (text.includes("monthly") || text.includes("month")) {
-            startTime = now - MONTH;
-            period = "month";
+            callback({
+                text: reportText,
+                action: "MEMBER_REPORT"
+            });
+        } catch (error) {
+            console.error(error)
         }
-
-        const members = await getMemberReport(groupId, startTime);
-        const reportText = generateReportText(members, period);
-
-        callback({
-            text: reportText,
-            action: "MEMBER_REPORT"
-        });
     },
     examples: []
 }; 

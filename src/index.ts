@@ -26,15 +26,15 @@ import {
     parseArguments,
 } from "./config/index.ts";
 import {initializeDatabase} from "./database/index.ts";
-import { allGroupSummaryAction, summaryAction } from "./action/summary.ts";
-import { banAction } from "./action/ban.ts";
+import { summaryAction } from "./action/summary.ts";
 import { autoMention, mentionAction } from "./action/mention.ts";
 import { checkMentionTimeouts } from "./action/utils.ts";
 import { memberReportAction } from "./action/memberReport.ts";
 import { pollAction } from "./action/poll.ts";
 import { sendToGroupAction } from "./action/sendToGroup.ts";
 import { defaultAction } from "./action/default.ts";
-import { unansweredQuestionsAction } from "./action/unansweredQuestions.ts";
+import { groupRulesAction } from "./action/groupRules.ts";
+import { unansweredQuestionAction } from "./action/unansweredQuestion.ts";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -75,16 +75,15 @@ export function createAgent(
         ].filter(Boolean),
         providers: [],
         actions: [
-            banAction,
+            groupRulesAction,
             summaryAction,
             mentionAction,
-            allGroupSummaryAction,
             autoMention,
             memberReportAction,
             pollAction,
             sendToGroupAction,
-            unansweredQuestionsAction,
-            defaultAction
+            defaultAction,
+            unansweredQuestionAction,
         ],
         services: [],
         managers: [],
@@ -112,6 +111,10 @@ async function startAgent(character: Character, directClient: DirectClient) {
         const runtime = createAgent(character, db, cache, token);
 
         await runtime.initialize();
+
+        (runtime as any).processActions = () => {
+            console.log("do nothing")
+        }
 
         runtime.clients = await initializeClients(character, runtime);
 
@@ -189,6 +192,8 @@ const startAgents = async () => {
         // wrap it so we don't have to inject directClient later
         return startAgent(character, directClient);
     };
+
+    
 
     directClient.start(serverPort);
 

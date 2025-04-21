@@ -1,12 +1,12 @@
-import type { Message } from "@telegraf/types";
-import type { Context, Telegraf } from "telegraf";
+import type {Message} from "@telegraf/types";
+import type {Context, Telegraf} from "telegraf";
 import {
     composeContext,
     elizaLogger,
     ServiceType,
     composeRandomUser,
 } from "@elizaos/core";
-import { getEmbeddingZeroVector, Action } from '@elizaos/core';
+import {getEmbeddingZeroVector, Action} from '@elizaos/core';
 import {
     type Content,
     type HandlerCallback,
@@ -18,15 +18,15 @@ import {
     type UUID,
     type Media,
 } from "@elizaos/core";
-import { stringToUuid } from "@elizaos/core";
-import { generateMessageResponse, generateShouldRespond } from "@elizaos/core";
+import {stringToUuid} from "@elizaos/core";
+import {generateMessageResponse, generateShouldRespond} from "@elizaos/core";
 import {
     telegramMessageHandlerTemplate,
     telegramShouldRespondTemplate,
     telegramAutoPostTemplate,
     telegramPinnedMessageTemplate,
 } from "./templates.ts";
-import { cosineSimilarity, escapeMarkdown } from "./utils.ts";
+import {cosineSimilarity, escapeMarkdown} from "./utils.ts";
 import {
     MESSAGE_CONSTANTS,
     TIMING_CONSTANTS,
@@ -35,7 +35,8 @@ import {
 } from "./constants.ts";
 
 import fs from "fs";
-import { message } from 'telegraf/filters';
+import {message} from 'telegraf/filters';
+import redis from "../redis/redis.ts";
 
 enum MediaType {
     PHOTO = "photo",
@@ -72,6 +73,21 @@ export type InterestChats = {
     };
 };
 
+interface RuleCondition {
+    type: 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'matches_regex' | 'length_greater' | 'length_less';
+    value: string | number;
+    case_sensitive?: boolean;
+}
+
+interface GroupRule {
+    id: string;
+    name: string;
+    description: string;
+    conditions: RuleCondition[];
+    action: 'warn' | 'mute' | 'ban' | 'kick';
+    duration?: number; // Duration in minutes for temporary actions
+}
+
 export class MessageManager {
     public bot: Telegraf<Context>;
     private runtime: IAgentRuntime;
@@ -104,8 +120,8 @@ export class MessageManager {
                 this.runtime.character.clientConfig?.telegram?.autoPost
                     ?.inactivityThreshold || 3600000,
             mainChannelId:
-                this.runtime.character.clientConfig?.telegram?.autoPost
-                    ?.mainChannelId,
+            this.runtime.character.clientConfig?.telegram?.autoPost
+                ?.mainChannelId,
             pinnedMessagesGroups:
                 this.runtime.character.clientConfig?.telegram?.autoPost
                     ?.pinnedMessagesGroups || [],
@@ -198,13 +214,13 @@ export class MessageManager {
             if (
                 timeSinceLastMessage > randomThreshold &&
                 timeSinceLastAutoPost >
-                    (this.autoPostConfig.minTimeBetweenPosts || 0)
+                (this.autoPostConfig.minTimeBetweenPosts || 0)
             ) {
                 try {
                     const roomId = stringToUuid(
                         this.autoPostConfig.mainChannelId +
-                            "-" +
-                            this.runtime.agentId
+                        "-" +
+                        this.runtime.agentId
                     );
                     const memory = {
                         id: stringToUuid(`autopost-${Date.now()}`),
@@ -329,9 +345,9 @@ export class MessageManager {
                 typeof pinnedMessage.text === "string"
                     ? pinnedMessage.text
                     : "caption" in pinnedMessage &&
-                      typeof pinnedMessage.caption === "string"
-                    ? pinnedMessage.caption
-                    : "New pinned message";
+                    typeof pinnedMessage.caption === "string"
+                        ? pinnedMessage.caption
+                        : "New pinned message";
 
             const roomId = stringToUuid(
                 mainChannel + "-" + this.runtime.agentId
@@ -504,8 +520,8 @@ export class MessageManager {
             "text" in message
                 ? message.text
                 : "caption" in message
-                ? message.caption
-                : "";
+                    ? message.caption
+                    : "";
 
         if (!messageText) return false;
 
@@ -567,8 +583,8 @@ export class MessageManager {
             "text" in message
                 ? message.text
                 : "caption" in message
-                ? message.caption
-                : "";
+                    ? message.caption
+                    : "";
         if (!messageText) return false;
 
         const isReplyToBot =
@@ -583,7 +599,7 @@ export class MessageManager {
             isReplyToBot ||
             isMentioned ||
             (!this.runtime.character.clientConfig?.telegram
-                ?.shouldRespondOnlyToMentions &&
+                    ?.shouldRespondOnlyToMentions &&
                 hasUsername)
         );
     }
@@ -663,9 +679,9 @@ export class MessageManager {
                     this.runtime.getService<IImageDescriptionService>(
                         ServiceType.IMAGE_DESCRIPTION
                     );
-                const { title, description } =
+                const {title, description} =
                     await imageDescriptionService.describeImage(imageUrl);
-                return { description: `[Image: ${title}\n${description}]` };
+                return {description: `[Image: ${title}\n${description}]`};
             }
         } catch (error) {
             console.error("❌ Error processing image:", error);
@@ -715,8 +731,8 @@ export class MessageManager {
             "text" in message
                 ? message.text
                 : "caption" in message
-                ? message.caption
-                : "";
+                    ? message.caption
+                    : "";
 
         // Check if team member has direct interest first
         if (
@@ -737,8 +753,8 @@ export class MessageManager {
                     const randomDelay =
                         Math.floor(
                             Math.random() *
-                                (TIMING_CONSTANTS.TEAM_MEMBER_DELAY_MAX -
-                                    TIMING_CONSTANTS.TEAM_MEMBER_DELAY_MIN)
+                            (TIMING_CONSTANTS.TEAM_MEMBER_DELAY_MAX -
+                                TIMING_CONSTANTS.TEAM_MEMBER_DELAY_MIN)
                         ) + TIMING_CONSTANTS.TEAM_MEMBER_DELAY_MIN; // 1-3 second random delay
                     await new Promise((resolve) =>
                         setTimeout(resolve, randomDelay)
@@ -764,8 +780,8 @@ export class MessageManager {
                     const leaderResponded = recentMessages.some(
                         (m) =>
                             m.userId ===
-                                this.runtime.character.clientConfig?.telegram
-                                    ?.teamLeaderId &&
+                            this.runtime.character.clientConfig?.telegram
+                                ?.teamLeaderId &&
                             Date.now() - chatState.lastMessageSent < 3000
                     );
 
@@ -786,8 +802,8 @@ export class MessageManager {
                 const randomDelay =
                     Math.floor(
                         Math.random() *
-                            (TIMING_CONSTANTS.LEADER_DELAY_MAX -
-                                TIMING_CONSTANTS.LEADER_DELAY_MIN)
+                        (TIMING_CONSTANTS.LEADER_DELAY_MAX -
+                            TIMING_CONSTANTS.LEADER_DELAY_MIN)
                     ) + TIMING_CONSTANTS.LEADER_DELAY_MIN; // 2-4 second random delay
                 await new Promise((resolve) =>
                     setTimeout(resolve, randomDelay)
@@ -825,7 +841,7 @@ export class MessageManager {
             if (chatState?.currentHandler) {
                 if (
                     chatState.currentHandler !==
-                        this.bot.botInfo?.id.toString() &&
+                    this.bot.botInfo?.id.toString() &&
                     this._isTeamMember(chatState.currentHandler)
                 ) {
                     return false;
@@ -836,7 +852,7 @@ export class MessageManager {
             if (!this._isMessageForMe(message) && this.interestChats[chatId]) {
                 const recentMessages = this.interestChats[
                     chatId
-                ].messages.slice(-MESSAGE_CONSTANTS.CHAT_HISTORY_COUNT);
+                    ].messages.slice(-MESSAGE_CONSTANTS.CHAT_HISTORY_COUNT);
                 const ourMessageCount = recentMessages.filter(
                     (m) => m.userId === this.runtime.agentId
                 ).length;
@@ -933,7 +949,7 @@ export class MessageManager {
                     {
                         reply_parameters:
                             i === 0 && replyToMessageId
-                                ? { message_id: replyToMessageId }
+                                ? {message_id: replyToMessageId}
                                 : undefined,
                         parse_mode: "Markdown",
                     }
@@ -974,7 +990,7 @@ export class MessageManager {
 
             if (isUrl) {
                 // Handle HTTP URLs
-                await sendFunction(ctx.chat.id, mediaPath, { caption });
+                await sendFunction(ctx.chat.id, mediaPath, {caption});
             } else {
                 // Handle local file paths
                 if (!fs.existsSync(mediaPath)) {
@@ -986,8 +1002,8 @@ export class MessageManager {
                 try {
                     await sendFunction(
                         ctx.chat.id,
-                        { source: fileStream },
-                        { caption }
+                        {source: fileStream},
+                        {caption}
                     );
                 } finally {
                     fileStream.destroy();
@@ -1033,7 +1049,7 @@ export class MessageManager {
         _state: State,
         context: string
     ): Promise<Content> {
-        const { userId, roomId } = message;
+        const {userId, roomId} = message;
 
         const response = await generateMessageResponse({
             runtime: this.runtime,
@@ -1047,7 +1063,7 @@ export class MessageManager {
         }
 
         await this.runtime.databaseAdapter.log({
-            body: { message, context, response },
+            body: {message, context, response},
             userId,
             roomId,
             type: "response",
@@ -1056,10 +1072,122 @@ export class MessageManager {
         return response;
     }
 
+    private async _checkGroupRules(ctx: Context, messageText: string): Promise<void> {
+        try {
+            const groupId = ctx.chat.id.toString();
+            const userId = ctx.from?.id.toString();
+            if (!userId) return;
+
+            const rules = await redis.hgetall(`group:${groupId}:rules`);
+            if (!rules) return;
+
+            for (const [ruleId, ruleJson] of Object.entries(rules)) {
+                try {
+                    const rule: GroupRule = JSON.parse(ruleJson as string);
+
+                    // Check if any condition is met
+                    const conditionMet = rule.conditions.some(condition => {
+                        const text = condition.case_sensitive ? messageText : messageText.toLowerCase();
+
+                        // Handle numeric conditions separately
+                        if (condition.type === 'length_greater' || condition.type === 'length_less') {
+                            const lengthValue = Number(condition.value);
+                            if (isNaN(lengthValue)) return false;
+                            return condition.type === 'length_greater'
+                                ? messageText.length > lengthValue
+                                : messageText.length < lengthValue;
+                        }
+
+                        // Handle string conditions
+                        const value = String(condition.value);
+                        const checkValue = condition.case_sensitive ? value : value.toLowerCase();
+
+                        switch (condition.type) {
+                            case 'contains':
+                                return text.includes(checkValue);
+                            case 'not_contains':
+                                return !text.includes(checkValue);
+                            case 'starts_with':
+                                return text.startsWith(checkValue);
+                            case 'ends_with':
+                                return text.endsWith(checkValue);
+                            case 'matches_regex':
+                                try {
+                                    const regex = new RegExp(checkValue, condition.case_sensitive ? '' : 'i');
+                                    return regex.test(messageText);
+                                } catch (e) {
+                                    console.error(`Invalid regex pattern: ${checkValue}`);
+                                    return false;
+                                }
+                            default:
+                                return false;
+                        }
+                    });
+
+                    if (conditionMet) {
+                        const numericUserId = Number(userId);
+                        if (isNaN(numericUserId)) return;
+
+                        switch (rule.action) {
+                            case 'warn':
+                                await ctx.reply(`⚠️ Warning: Your message violates rule "${rule.name}"`);
+                                break;
+                            case 'mute':
+                                await ctx.telegram.restrictChatMember(
+                                    groupId,
+                                    numericUserId,
+                                    {
+                                        permissions: {
+                                            can_send_messages: false,
+                                            can_send_polls: false,
+                                            can_send_other_messages: false,
+                                            can_add_web_page_previews: false
+                                        },
+                                        until_date: rule.duration ? Math.floor(Date.now() / 1000) + (rule.duration * 60) : undefined
+                                    }
+                                );
+                                await ctx.reply(`🔇 User has been muted for violating rule "${rule.name}"${rule.duration ? ` for ${rule.duration} minutes` : ''}`);
+                                break;
+                            case 'ban':
+                                await ctx.telegram.banChatMember(
+                                    groupId,
+                                    numericUserId,
+                                    rule.duration ? Math.floor(Date.now() / 1000) + (rule.duration * 60) : undefined
+                                );
+                                await ctx.reply(`🚫 User has been banned for violating rule "${rule.name}"${rule.duration ? ` for ${rule.duration} minutes` : ''}`);
+                                break;
+                            case 'kick':
+                                // Implement kick by banning for 30 seconds then unbanning
+                                await ctx.telegram.banChatMember(
+                                    groupId,
+                                    numericUserId,
+                                    Math.floor(Date.now() / 1000) + 30
+                                );
+                                await ctx.reply(`👢 User has been kicked for violating rule "${rule.name}"`);
+                                break;
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Error processing rule ${ruleId}:`, error);
+                }
+            }
+        } catch (error) {
+            console.error('Error checking group rules:', error);
+        }
+    }
+
     // Main handler for incoming messages
     public async handleMessage(ctx: Context): Promise<void> {
         if (!ctx.message || !ctx.from) {
             return; // Exit if no message or sender info
+        }
+
+        // Check group rules before processing the message
+        if (ctx.chat?.type !== "private") {
+            const messageText = "text" in ctx.message ? ctx.message.text : "";
+            if (messageText) {
+                await this._checkGroupRules(ctx, messageText);
+            }
         }
 
         this.lastChannelActivity[ctx.chat.id.toString()] = Date.now();
@@ -1096,8 +1224,8 @@ export class MessageManager {
             "text" in message
                 ? message.text
                 : "caption" in message
-                ? message.caption
-                : "";
+                    ? message.caption
+                    : "";
 
         // Add team handling at the start
         if (
@@ -1187,7 +1315,7 @@ export class MessageManager {
                 if (
                     hasInterest ||
                     this.interestChats[chatId]?.currentHandler ===
-                        this.bot.botInfo?.id.toString()
+                    this.bot.botInfo?.id.toString()
                 ) {
                     delete this.interestChats[chatId];
 
@@ -1217,7 +1345,7 @@ export class MessageManager {
                         ctx.from.username ||
                         ctx.from.first_name ||
                         "Unknown User",
-                    content: { text: messageText, source: "telegram" },
+                    content: {text: messageText, source: "telegram"},
                 });
 
                 if (
@@ -1226,7 +1354,7 @@ export class MessageManager {
                 ) {
                     this.interestChats[chatId].messages = this.interestChats[
                         chatId
-                    ].messages.slice(-MESSAGE_CONSTANTS.MAX_MESSAGES);
+                        ].messages.slice(-MESSAGE_CONSTANTS.MAX_MESSAGES);
                 }
             }
         }
@@ -1291,10 +1419,10 @@ export class MessageManager {
                 inReplyTo:
                     "reply_to_message" in message && message.reply_to_message
                         ? stringToUuid(
-                              message.reply_to_message.message_id.toString() +
-                                  "-" +
-                                  this.runtime.agentId
-                          )
+                            message.reply_to_message.message_id.toString() +
+                            "-" +
+                            this.runtime.agentId
+                        )
                         : undefined,
             };
 
@@ -1367,27 +1495,17 @@ export class MessageManager {
             };
 
             if (shouldRespond) {
-                // Generate response
-                const context = composeContext({
-                    state,
-                    template:
-                        this.runtime.character.templates
-                            ?.telegramMessageHandlerTemplate ||
-                        this.runtime.character?.templates
-                            ?.messageHandlerTemplate ||
-                        telegramMessageHandlerTemplate,
-                });
-
-                const actionNames = ["SUMMARY_GROUPS", "MENTION_AUTO", "MENTION", "BAN", "MEMBER_REPORT", "POLL", "SEND_TO_GROUP", "UNANSWERED_QUESTIONS"];
+                const actionNames = ["SUMMARY", "MENTION_AUTO", "MENTION", "GROUP_RULES", "MEMBER_REPORT", "POLL", "SEND_TO_GROUP", "UNANSWERED_QUESTIONS"];
                 let handled = false;
 
                 for (let action of this.runtime.actions.filter(a => actionNames.includes(a.name))) {
                     if (!action) continue;
-                
+                    state.handle = true
                     const shouldHandle = await action.validate(this.runtime, memory, state);
                     if (shouldHandle) {
-                        await action.handler(this.runtime, memory, state, { ctx }, callback);
+                        await action.handler(this.runtime, memory, state, {ctx,}, callback);
                         handled = true;
+                        break;
                         // Don't break here to allow the default action to handle if no other action did
                     }
                 }
@@ -1396,7 +1514,7 @@ export class MessageManager {
                 if (!handled) {
                     const defaultAction = this.runtime.actions.find(a => a.name === "DEFAULT");
                     if (defaultAction) {
-                        await defaultAction.handler(this.runtime, memory, state, { ctx }, callback);
+                        await defaultAction.handler(this.runtime, memory, state, {ctx}, callback);
                     }
                 }
             }

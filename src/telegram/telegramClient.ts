@@ -7,7 +7,7 @@ import redis from "../redis/redis.ts";
 import {Update} from "telegraf/types";
 import {handleMention, markMentionsAsRead, trackMention} from "../action/utils.ts";
 import {trackNewMember} from "../action/memberReport.ts";
-import { handlePollCallback } from "../action/poll.ts";
+import {handlePollCallback} from "../action/poll.ts";
 
 export class TelegramClient {
     private bot: Telegraf<Context>;
@@ -133,7 +133,7 @@ export class TelegramClient {
                 `• Cross-group messaging\n` +
                 `• Member activity tracking`;
 
-            await ctx.reply(helpMessage, { parse_mode: 'Markdown' });
+            await ctx.reply(helpMessage, {parse_mode: 'Markdown'});
         });
 
         this.bot.on(message("new_chat_members"), async (ctx) => {
@@ -221,7 +221,7 @@ export class TelegramClient {
 
                         await redis.set(`user:${userId}:private_chat_id`, chatId.toString());
                         console.log(`Saved private chat id ${chatId} for user ${userId}`)
-                    } catch (e){
+                    } catch (e) {
                         console.error(e)
                     }
                 }
@@ -260,7 +260,6 @@ export class TelegramClient {
                     handleMention(ctx)
 
                 }
-
 
 
                 if (this.tgTrader) {

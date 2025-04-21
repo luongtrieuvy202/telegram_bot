@@ -4,12 +4,14 @@ import {
     Memory,
     State,
     HandlerCallback,
+    generateText,
+    ModelClass
 } from "@elizaos/core";
-import { Context } from "telegraf";
-import { Update, CallbackQuery } from "telegraf/types";
+import {Context} from "telegraf";
+import {Update, CallbackQuery} from "telegraf/types";
 import redis from "../redis/redis.ts";
-import { POLL_CONSTANTS } from "../telegram/constants.ts";
-import { getGroupsByUserId } from "./utils.ts";
+import {POLL_CONSTANTS} from "../telegram/constants.ts";
+import {getGroupsByUserId} from "./utils.ts";
 
 interface Poll {
     id: string;
@@ -38,19 +40,32 @@ interface PollResponse {
     timestamp: number;
 }
 
+// Helper function to extract JSON from text response
+function extractJsonFromResponse(text: string): any {
+    try {
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+        }
+    } catch (error) {
+        console.error('Error parsing JSON:', error);
+    }
+    return null;
+}
+
 export async function handlePollCallback(ctx: Context<Update>): Promise<void> {
     if (!ctx.callbackQuery || !('data' in ctx.callbackQuery)) return;
-    
+
     const callbackData = ctx.callbackQuery.data;
     console.log('Received callback:', callbackData);
-    
+
     if (callbackData.startsWith('poll_vote:')) {
         const [, pollId, option] = callbackData.split(':');
         if (!pollId || !option) {
             await ctx.answerCbQuery('Invalid vote data');
             return;
         }
-        
+
         const poll = await getPoll(pollId);
         if (!poll || poll.status === 'closed') {
             await ctx.answerCbQuery('This poll is no longer active');
@@ -60,7 +75,7 @@ export async function handlePollCallback(ctx: Context<Update>): Promise<void> {
         // Check if user has already voted
         const userVoteKey = `poll_user_vote:${pollId}:${ctx.from.id}`;
         const existingVote = await redis.get(userVoteKey);
-        
+
         if (existingVote) {
             // If user voted for a different option, remove their previous vote
             if (existingVote !== option) {
@@ -84,11 +99,11 @@ export async function handlePollCallback(ctx: Context<Update>): Promise<void> {
         await redis.expire(userVoteKey, POLL_CONSTANTS.POLL_EXPIRY);
 
         await ctx.answerCbQuery('Vote recorded!');
-        
+
         // Update the poll message with new results
         const message = formatResultsMessage(poll);
         const keyboard = poll.options.map((opt, i) => [
-            { text: `${i + 1}. ${opt}`, callback_data: `poll_vote:${pollId}:${opt}` }
+            {text: `${i + 1}. ${opt}`, callback_data: `poll_vote:${pollId}:${opt}`}
         ]);
 
         try {
@@ -106,10 +121,69 @@ export async function handlePollCallback(ctx: Context<Update>): Promise<void> {
 export const pollAction: Action = {
     name: 'POLL',
     similes: [],
-    description: "Handle poll creation and voting",
+    description: "Handle poll creation and management",
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
-        const text = message.content.text?.toLowerCase() || '';
-        return text.startsWith('/poll');
+        if (!state?.handle) return false;
+
+        // Store the message for context
+        await runtime.messageManager.createMemory({
+            roomId: message.roomId,
+            userId: message.userId,
+            agentId: message.agentId,
+            content: {
+                text: message.content.text,
+                type: "text"
+            }
+        });
+
+        // Get recent messages for context
+        const recentMessages = await runtime.messageManager.getMemories({
+            roomId: message.roomId,
+            count: 5
+        });
+
+        const intentPrompt = `You are a helpful Telegram group assistant. Your task is to determine if the user wants to create, view results, or close a poll.
+
+Analyze the following message and context to determine if this is a poll-related request. Consider:
+- Poll creation requests (e.g., "create a poll about X", "let's vote on X")
+- Results inquiries (e.g., "show poll results", "what's the outcome")
+- Poll management (e.g., "close the poll", "end the voting")
+- Group-specific poll requests
+- Context from previous messages
+
+Previous messages for context:
+${recentMessages.map(m => m.content.text).join('\n')}
+
+Current message: "${message.content.text}"
+
+Return ONLY a JSON object with the following structure, no other text:
+{
+    "isPollRequest": boolean, // true if this is a poll-related request
+    "pollType": string, // "create", "results", "close", "list", or null
+    "confidence": number, // confidence score from 0 to 1
+    "groupName": string, // name of the group if specified
+    "pollDetails": { // only if pollType is "create"
+        "question": string,
+        "options": string[]
+    }
+}`;
+
+        const analysis = await generateText({
+            runtime,
+            context: intentPrompt,
+            modelClass: ModelClass.SMALL
+        });
+
+        console.log('Poll analysis response:', analysis);
+
+        const result = extractJsonFromResponse(analysis);
+        if (!result) {
+            console.error('Failed to extract valid JSON from analysis');
+            return false;
+        }
+
+        // Only proceed if confidence is high enough
+        return result.isPollRequest && result.confidence > 0.7;
     },
     suppressInitialMessage: true,
     handler: async (
@@ -120,81 +194,118 @@ export const pollAction: Action = {
         callback?: HandlerCallback
     ): Promise<void> => {
         const ctx = options.ctx as Context<Update>;
-        const text = message.content.text || '';
-        const match = text.match(/^\/poll\s+(\w+)\s*(.*)$/);
-        if (!match) {
-            await ctx.reply('Invalid poll command format');
+
+        // Get user's groups from Redis
+        const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
+
+        // Re-analyze with group context
+        const analysis = await generateText({
+            runtime,
+            context: `You are a JSON-only response bot. Your task is to analyze a poll request with group context.
+            Message: ${message.content.text}
+            Available groups: ${groupInfos.map(g => g.title).join(', ')}
+            
+            Return ONLY a JSON object with the following structure, no other text:
+            {
+                "pollType": string, // "create", "results", "close", "list"
+                "targetGroup": string, // name of the group to create poll in
+                "pollDetails": { // only if pollType is "create"
+                    "question": string,
+                    "options": string[]
+                },
+                "pollId": string, // for results/close/list
+                "response": string // the exact message the bot should respond with
+            }`,
+            modelClass: ModelClass.SMALL
+        });
+
+        console.log('Handler analysis response:', analysis);
+
+        const result = extractJsonFromResponse(analysis);
+        if (!result) {
+            console.error('Failed to extract valid JSON from handler analysis');
+            await callback({
+                text: "I'm having trouble understanding your poll request. Could you please rephrase?",
+                action: "POLL"
+            });
             return;
         }
 
-        const [, command, rest] = match;
-        let args: string[] = [];
+        // Find the target group by name (not ID)
+        const targetGroup = groupInfos.find(group =>
+            group.title?.toLowerCase() === result.targetGroup?.toLowerCase()
+        );
 
-        // For create command, parse the rest of the text differently
-        if (command === 'create') {
-            // Match group name and poll details
-            const groupMatch = rest.match(/^@(\w+)\s+(.*)$/);
-            if (!groupMatch) {
-                await ctx.reply('Usage: /poll create @group_name "question" "option1" "option2" [option3] [option4]\n\nMake sure to specify the group and put the question and options in quotes.');
-                return;
-            }
-
-            const [, groupName, pollText] = groupMatch;
-            const matches = pollText.match(/"([^"]*)"/g);
-            if (!matches || matches.length < 3) {
-                await ctx.reply('Usage: /poll create @group_name "question" "option1" "option2" [option3] [option4]\n\nMake sure to put the question and options in quotes.');
-                return;
-            }
-            args = [groupName, ...matches.map(m => m.replace(/"/g, '').trim())];
-        } else {
-            // For other commands, split by space
-            args = rest.split(' ').filter(Boolean);
-        }
-
-        switch (command) {
+        switch (result.pollType) {
             case 'create':
-                await handlePollCreate(ctx, args);
+                if (!targetGroup) {
+                    await callback({
+                        text: `I couldn't find the group "${result.targetGroup}". Here are the groups you have access to:\n${groupInfos.map(g => g.title).join('\n')}`,
+                        action: "POLL"
+                    });
+                    return;
+                }
+
+                if (!result.pollDetails?.question || !result.pollDetails?.options?.length) {
+                    await callback({
+                        text: "I need both a question and at least two options to create a poll. Please provide them.",
+                        action: "POLL"
+                    });
+                    return;
+                }
+
+                await handlePollCreate(ctx, parseInt(targetGroup.id), result.pollDetails.question, result.pollDetails.options);
                 break;
-            case 'vote':
-                await handlePollVote(ctx, args[0], args[1]);
-                break;
+
             case 'results':
-                await handlePollResults(ctx, args[0]);
+                if (!result.pollId) {
+                    await callback({
+                        text: "Please specify which poll's results you want to see.",
+                        action: "POLL"
+                    });
+                    return;
+                }
+                await handlePollResults(ctx, result.pollId);
                 break;
+
             case 'close':
-                await handlePollClose(ctx, args[0]);
+                if (!result.pollId) {
+                    await callback({
+                        text: "Please specify which poll you want to close.",
+                        action: "POLL"
+                    });
+                    return;
+                }
+                await handlePollClose(ctx, result.pollId);
                 break;
+
             case 'list':
-                await handlePollList(ctx, args[0]);
+                await handlePollList(ctx, targetGroup?.id);
                 break;
+
             default:
-                await ctx.reply('Invalid poll command. Use /poll create, vote, results, close, or list');
+                await callback({
+                    text: "I'm not sure what you'd like to do with the poll. Please specify create, results, close, or list.",
+                    action: "POLL"
+                });
         }
     },
     examples: []
 };
 
-async function handlePollCreate(ctx: Context<Update>, args: string[]) {
-    if (args.length < 4) {
-        await ctx.reply('Usage: /poll create @group_name "question" "option1" "option2" [option3] [option4]\n\nMake sure to specify the group and put the question and options in quotes.');
-        return;
-    }
-
-    const groupName = args[0].replace('@', '');
-    const question = args[1];
-    const options = args.slice(2);
-
+async function handlePollCreate(ctx: Context<Update>, groupId: number, question: string, options: string[]) {
     if (options.length < POLL_CONSTANTS.MIN_OPTIONS || options.length > POLL_CONSTANTS.MAX_OPTIONS) {
         await ctx.reply(`Please provide between ${POLL_CONSTANTS.MIN_OPTIONS} and ${POLL_CONSTANTS.MAX_OPTIONS} options`);
         return;
     }
 
     // Get user's groups using existing function
-    const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id);
-    const groupInfo = groupInfos.find(g => g.title.toLowerCase() === groupName.toLowerCase());
-    
+    const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
+
+    // Get group info
+    const groupInfo = groupInfos.find(g => g.id === groupId.toString());
     if (!groupInfo) {
-        await ctx.reply(`Group @${groupName} not found or you don't have access to it.`);
+        await ctx.reply(`Group ID ${groupId} not found or you don't have access to it.`);
         return;
     }
 
@@ -227,80 +338,22 @@ async function handlePollCreate(ctx: Context<Update>, args: string[]) {
     // Send poll to the specified group
     const message = formatPollMessage(poll);
     const keyboard = options.map((opt, i) => [
-        { text: `${i + 1}. ${opt}`, callback_data: `poll_vote:${poll.id}:${opt}` }
+        {text: `${i + 1}. ${opt}`, callback_data: `poll_vote:${poll.id}:${opt}`}
     ]);
 
     try {
         // Send the poll to the group
-        await ctx.telegram.sendMessage(groupInfo.id, message, {
+        await ctx.telegram.sendMessage(parseInt(groupInfo.id), message, {
             reply_markup: {
                 inline_keyboard: keyboard
             }
         });
 
         // Send private message to the creator with poll details
-        const privateMessage = `📊 Your poll has been created!\n\nQuestion: ${question}\nGroup: @${groupName}\nPoll ID: ${poll.id}\n\nUse these commands to manage your poll:\n/poll results ${poll.id} - View results\n/poll close ${poll.id} - Close the poll`;
+        const privateMessage = `📊 Your poll has been created!\n\nQuestion: ${question}\nGroup: @${groupInfo.title}\nPoll ID: ${poll.id}\n\nUse these commands to manage your poll:\n/poll results ${poll.id} - View results\n/poll close ${poll.id} - Close the poll`;
         await ctx.reply(privateMessage);
     } catch (error) {
-        await ctx.reply(`Failed to create poll in @${groupName}. Make sure the bot is a member of the group and has permission to send messages.`);
-    }
-}
-
-async function handlePollVote(ctx: Context<Update>, pollId: string, option: string) {
-    console.log('Handling vote:', { pollId, option });
-    const poll = await getPoll(pollId);
-    if (!poll || poll.status === 'closed') {
-        console.log('Poll not found or closed:', pollId);
-        await ctx.answerCbQuery('This poll is no longer active');
-        return;
-    }
-
-    // Check if user has already voted
-    const userVoteKey = `poll_user_vote:${pollId}:${ctx.from.id}`;
-    const existingVote = await redis.get(userVoteKey);
-    
-    if (existingVote) {
-        // If user voted for a different option, remove their previous vote
-        if (existingVote !== option) {
-            const currentVotes = poll.responses.votes.get(existingVote) || 0;
-            poll.responses.votes.set(existingVote, Math.max(0, currentVotes - 1));
-            poll.responses.total = Math.max(0, poll.responses.total - 1);
-        } else {
-            await ctx.answerCbQuery('You have already voted for this option');
-            return;
-        }
-    }
-
-    // Record the new vote
-    const currentVotes = poll.responses.votes.get(option) || 0;
-    poll.responses.votes.set(option, currentVotes + 1);
-    poll.responses.total += 1;
-
-    // Store the updated poll and user's vote
-    await storePoll(poll);
-    await redis.set(userVoteKey, option);
-    await redis.expire(userVoteKey, POLL_CONSTANTS.POLL_EXPIRY);
-
-    await ctx.answerCbQuery('Vote recorded!');
-    
-    // Update the poll message with new results
-    const message = formatResultsMessage(poll);
-    const keyboard = poll.options.map((opt, i) => [
-        { text: `${i + 1}. ${opt}`, callback_data: `poll_vote:${pollId}:${opt}` }
-    ]);
-
-    try {
-        if (ctx.callbackQuery?.message?.message_id) {
-            await ctx.editMessageText(message, {
-                reply_markup: {
-                    inline_keyboard: keyboard
-                }
-            });
-        } else {
-            console.log('No message_id found in callback query');
-        }
-    } catch (error) {
-        console.error('Failed to update poll message:', error);
+        await ctx.reply(`Failed to create poll in @${groupInfo.title}. Make sure the bot is a member of the group and has permission to send messages.`);
     }
 }
 
@@ -342,7 +395,7 @@ function formatResultsMessage(poll: Poll): string {
         const percentage = total > 0 ? Math.round((votes / total) * 100) : 0;
         return `${opt}: ${percentage}% (${votes} votes)`;
     }).join('\n');
-    
+
     return `📊 ${poll.question}\n\n${results}\n\nTotal votes: ${total}`;
 }
 
@@ -363,7 +416,7 @@ async function getPoll(pollId: string): Promise<Poll | null> {
     // Search across all groups for the poll
     const keys = await redis.keys(`${POLL_CONSTANTS.GROUP_POLL_PREFIX}*:${pollId}`);
     if (keys.length === 0) return null;
-    
+
     const data = await redis.get(keys[0]);
     if (!data) return null;
 
@@ -398,7 +451,7 @@ async function handlePollList(ctx: Context<Update>, groupName?: string) {
     }
 
     const polls: Poll[] = [];
-    
+
     for (const key of keys) {
         const data = await redis.get(key);
         if (data) {
@@ -414,7 +467,7 @@ async function handlePollList(ctx: Context<Update>, groupName?: string) {
         return;
     }
 
-    const message = polls.map(poll => 
+    const message = polls.map(poll =>
         `📊 ${poll.question}\nID: ${poll.id}\nGroup: @${poll.group.title}\nCreated by: @${poll.creator.username}\n`
     ).join('\n');
 

@@ -186,19 +186,19 @@ export async function trackMention(mentionerId, mentionedId, chatId, messageId, 
 
 export async function checkMentionTimeouts(bot: Telegraf) {
     const userKeys = await redis.keys('user:*:pending_mentions');
-    
+
     for (const userKey of userKeys) {
         const userId = userKey.split(':')[1];
         const mentions = await redis.zrange(userKey, 0, -1, 'WITHSCORES');
-        
+
         // Group mentions by user and collect data
         const mentionsToNotify = [];
         const mentionsToDelete = [];
-        
+
         for (const mention of mentions) {
             const [chatId, messageId] = mention.split(':');
             const mentionData = await redis.hgetall(`mention:${chatId}:${messageId}`);
-            
+
             if (mentionData.status === 'unresponded') {
                 mentionsToNotify.push(mentionData);
                 mentionsToDelete.push({
@@ -213,7 +213,7 @@ export async function checkMentionTimeouts(bot: Telegraf) {
         if (mentionsToNotify.length > 0) {
             try {
                 await handleUnrespondedMentions(userId, mentionsToNotify, bot);
-                
+
                 // Clean up all processed mentions
                 const pipeline = redis.pipeline();
                 for (const {userKey, mentionKey, hashKey} of mentionsToDelete) {
@@ -229,12 +229,11 @@ export async function checkMentionTimeouts(bot: Telegraf) {
 }
 
 
-
 /**
  * Custom function to create a MarkdownV2 link
  */
 function markdownLink(text: string, url: string): string {
-  return `[${escapeMarkdownV2(text)}](${url})`;
+    return `[${escapeMarkdownV2(text)}](${url})`;
 }
 
 /**
@@ -243,7 +242,7 @@ function markdownLink(text: string, url: string): string {
 function escapeMarkdownV2(text: string): string {
     if (!text) return '';
     const escapeChars = '_*[]()~`>#+-=|{}.!';
-    return text.split('').map(char => 
+    return text.split('').map(char =>
         escapeChars.includes(char) ? `\\${char}` : char
     ).join('');
 }
@@ -251,26 +250,26 @@ function escapeMarkdownV2(text: string): string {
 export async function handleUnrespondedMentions(userId: string, mentions: any[], bot: any) {
     try {
         const privateChatId = await redis.get(`user:${userId}:private_chat_id`);
-        
+
         if (privateChatId) {
             // Format all mentions into one message
             let message = `You have ${mentions.length} unresponded mention${mentions.length > 1 ? 's' : ''}:\n\n`;
-            
+
             for (const mention of mentions) {
                 const messageLink = `https://t.me/c/${mention.chat.replace('-100', '')}/${mention.message}`;
                 const escapedText = escapeMarkdownV2(mention.text || 'message');
                 const escapedChat = escapeMarkdownV2(mention.chat);
                 const escapedGroup = escapeMarkdownV2(mention.title || '')
-                
+
                 message += `• [${escapedText}](${messageLink}) in group \`${escapedGroup}\`\n`;
             }
-            
+
             await bot.telegram.sendMessage(
                 privateChatId,
                 message,
-                { 
+                {
                     parse_mode: 'MarkdownV2',
-                    disable_web_page_preview: true 
+                    disable_web_page_preview: true
                 }
             );
         } else {
@@ -282,13 +281,13 @@ export async function handleUnrespondedMentions(userId: string, mentions: any[],
                 }
                 mentionsByChat[mention.chat].push(mention);
             }
-            
+
             for (const [chatId, chatMentions] of Object.entries(mentionsByChat)) {
                 try {
                     await bot.telegram.sendMessage(
                         chatId,
                         `@${escapeMarkdownV2(mentions[0].mentioned)} you have ${chatMentions.length} unresponded mention${chatMentions.length > 1 ? 's' : ''} here!`,
-                        { parse_mode: 'HTML' }
+                        {parse_mode: 'HTML'}
                     );
                 } catch (groupError) {
                     console.error(`Failed to notify in group ${chatId}:`, groupError);
