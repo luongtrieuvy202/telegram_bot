@@ -279,6 +279,15 @@ export const groupRulesAction: Action = {
                 modelClass: ModelClass.SMALL
             });
 
+            await runtime.messageManager.createMemory({
+                content: {
+                    text: message.content.text
+                },
+                roomId: message.roomId,
+                userId: message.userId,
+                agentId: message.agentId
+            });
+
             const result = extractJsonFromResponse(response) as ValidationResult;
             if (!result || !result.is_rule_management || result.confidence < 0.7) {
                 callback({

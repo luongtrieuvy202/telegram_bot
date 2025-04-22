@@ -33,12 +33,6 @@ interface Poll {
     createdAt: number;
 }
 
-interface PollResponse {
-    pollId: string;
-    userId: number;
-    option: string;
-    timestamp: number;
-}
 
 // Helper function to extract JSON from text response
 function extractJsonFromResponse(text: string): any {
@@ -123,67 +117,66 @@ export const pollAction: Action = {
     similes: [],
     description: "Handle poll creation and management",
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
-        if (!state?.handle) return false;
+        console.log('[POLL] Starting validation check');
+        if (!state?.handle) {
+            console.log('[POLL] Validation failed: No state handle found');
+            return false;
+        }
 
-        // Store the message for context
-        await runtime.messageManager.createMemory({
-            roomId: message.roomId,
-            userId: message.userId,
-            agentId: message.agentId,
-            content: {
-                text: message.content.text,
-                type: "text"
-            }
-        });
 
-        // Get recent messages for context
+        console.log('[POLL] Fetching recent messages for context');
         const recentMessages = await runtime.messageManager.getMemories({
             roomId: message.roomId,
             count: 5
         });
 
-        const intentPrompt = `You are a helpful Telegram group assistant. Your task is to determine if the user wants to create, view results, or close a poll.
+        console.log('[POLL] Creating context for AI analysis');
+        const context = {
+            recentMessages: recentMessages.map(m => m.content.text).join('\n'),
+            currentMessage: message.content.text,
+            currentState: state
+        };
 
-Analyze the following message and context to determine if this is a poll-related request. Consider:
-- Poll creation requests (e.g., "create a poll about X", "let's vote on X")
-- Results inquiries (e.g., "show poll results", "what's the outcome")
-- Poll management (e.g., "close the poll", "end the voting")
-- Group-specific poll requests
-- Context from previous messages
-
-Previous messages for context:
-${recentMessages.map(m => m.content.text).join('\n')}
-
-Current message: "${message.content.text}"
-
-Return ONLY a JSON object with the following structure, no other text:
-{
-    "isPollRequest": boolean, // true if this is a poll-related request
-    "pollType": string, // "create", "results", "close", "list", or null
-    "confidence": number, // confidence score from 0 to 1
-    "groupName": string, // name of the group if specified
-    "pollDetails": { // only if pollType is "create"
-        "question": string,
-        "options": string[]
-    }
-}`;
-
+        console.log('[POLL] Analyzing intent with AI');
         const analysis = await generateText({
             runtime,
-            context: intentPrompt,
+            context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to manage polls.
+            IMPORTANT: This is ONLY for poll management, NOT for summarizing, sending messages, or finding mentions.
+            
+            Recent messages: ${context.recentMessages}
+            Current message: ${context.currentMessage}
+            
+            Return ONLY a JSON object with the following structure, no other text:
+            {
+                "hasIntent": boolean, // true ONLY if user wants to manage polls
+                "pollType": string, // "create", "results", "close", "list", or null
+                "confidence": number, // confidence score of the analysis
+                "groupName": string, // name of the group if specified
+                "pollDetails": { // only if pollType is "create"
+                    "question": string,
+                    "options": string[]
+                }
+            }`,
             modelClass: ModelClass.SMALL
         });
 
-        console.log('Poll analysis response:', analysis);
+        console.log('[POLL] AI Analysis response:', analysis);
 
         const result = extractJsonFromResponse(analysis);
         if (!result) {
-            console.error('Failed to extract valid JSON from analysis');
+            console.error('[POLL] Failed to extract valid JSON from analysis');
             return false;
         }
 
-        // Only proceed if confidence is high enough
-        return result.isPollRequest && result.confidence > 0.7;
+        console.log('[POLL] Analysis result:', JSON.stringify(result, null, 2));
+
+        if (!result.hasIntent || result.confidence < 0.7) {
+            console.log('[POLL] Low confidence or no intent found');
+            return false;
+        }
+
+        console.log('[POLL] Validation successful:', result.hasIntent);
+        return result.hasIntent;
     },
     suppressInitialMessage: true,
     handler: async (
@@ -193,37 +186,66 @@ Return ONLY a JSON object with the following structure, no other text:
         options?: any,
         callback?: HandlerCallback
     ): Promise<void> => {
+        console.log('[POLL] Starting handler execution');
         const ctx = options.ctx as Context<Update>;
 
-        // Get user's groups from Redis
-        const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
+        console.log('[POLL] Fetching recent messages for context');
+        const recentMessages = await runtime.messageManager.getMemories({
+            roomId: message.roomId,
+            count: 5
+        });
 
-        // Re-analyze with group context
+        console.log('[POLL] Fetching user groups from Redis');
+        const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
+        console.log('[POLL] Found groups:', groupInfos.map(g => g.title).join(', '));
+
+        console.log('[POLL] Analyzing message for specific action');
         const analysis = await generateText({
             runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze a poll request with group context.
-            Message: ${message.content.text}
+            context: `You are a JSON-only response bot. Your task is to analyze a message in the context of poll management.
+            
+            Recent conversation:
+            ${recentMessages.map(m => m.content.text).join('\n')}
+            
+            Current message: ${message.content.text}
             Available groups: ${groupInfos.map(g => g.title).join(', ')}
             
             Return ONLY a JSON object with the following structure, no other text:
             {
                 "pollType": string, // "create", "results", "close", "list"
-                "targetGroup": string, // name of the group to create poll in
+                "targetGroup": string, // name of the group (if specified)
                 "pollDetails": { // only if pollType is "create"
                     "question": string,
                     "options": string[]
                 },
-                "pollId": string, // for results/close/list
+                "pollId": string, // only if pollType is "results" or "close"
                 "response": string // the exact message the bot should respond with
-            }`,
+            }
+
+            Additional guidelines:
+            - Consider the recent conversation context when determining poll type
+            - If the user has been discussing a specific group, prioritize that group
+            - If the user has been creating polls, look for question and options in the conversation
+            - If the user has been checking results, look for poll IDs in the conversation
+            - If the user has been canceling frequently, be more explicit about the cancelation
+            `,
             modelClass: ModelClass.SMALL
         });
 
-        console.log('Handler analysis response:', analysis);
+        await runtime.messageManager.createMemory({
+            content: {
+                text: message.content.text
+            },
+            roomId: message.roomId,
+            userId: message.userId,
+            agentId: message.agentId
+        });
+
+        console.log('[POLL] Handler analysis response:', analysis);
 
         const result = extractJsonFromResponse(analysis);
         if (!result) {
-            console.error('Failed to extract valid JSON from handler analysis');
+            console.error('[POLL] Failed to extract valid JSON from handler analysis');
             await callback({
                 text: "I'm having trouble understanding your poll request. Could you please rephrase?",
                 action: "POLL"
@@ -231,14 +253,17 @@ Return ONLY a JSON object with the following structure, no other text:
             return;
         }
 
-        // Find the target group by name (not ID)
+        console.log('[POLL] Processing intent:', result.pollType);
+
         const targetGroup = groupInfos.find(group =>
             group.title?.toLowerCase() === result.targetGroup?.toLowerCase()
         );
 
         switch (result.pollType) {
             case 'create':
+                console.log('[POLL] Processing create intent for group:', result.targetGroup);
                 if (!targetGroup) {
+                    console.log('[POLL] Target group not found:', result.targetGroup);
                     await callback({
                         text: `I couldn't find the group "${result.targetGroup}". Here are the groups you have access to:\n${groupInfos.map(g => g.title).join('\n')}`,
                         action: "POLL"
@@ -247,6 +272,7 @@ Return ONLY a JSON object with the following structure, no other text:
                 }
 
                 if (!result.pollDetails?.question || !result.pollDetails?.options?.length) {
+                    console.log('[POLL] Missing poll details');
                     await callback({
                         text: "I need both a question and at least two options to create a poll. Please provide them.",
                         action: "POLL"
@@ -254,11 +280,14 @@ Return ONLY a JSON object with the following structure, no other text:
                     return;
                 }
 
+                console.log('[POLL] Creating poll with details:', JSON.stringify(result.pollDetails));
                 await handlePollCreate(ctx, parseInt(targetGroup.id), result.pollDetails.question, result.pollDetails.options);
                 break;
 
             case 'results':
+                console.log('[POLL] Processing results intent for poll:', result.pollId);
                 if (!result.pollId) {
+                    console.log('[POLL] No poll ID specified');
                     await callback({
                         text: "Please specify which poll's results you want to see.",
                         action: "POLL"
@@ -269,7 +298,9 @@ Return ONLY a JSON object with the following structure, no other text:
                 break;
 
             case 'close':
+                console.log('[POLL] Processing close intent for poll:', result.pollId);
                 if (!result.pollId) {
+                    console.log('[POLL] No poll ID specified');
                     await callback({
                         text: "Please specify which poll you want to close.",
                         action: "POLL"
@@ -280,15 +311,18 @@ Return ONLY a JSON object with the following structure, no other text:
                 break;
 
             case 'list':
+                console.log('[POLL] Processing list intent for group:', targetGroup?.title);
                 await handlePollList(ctx, targetGroup?.id);
                 break;
 
             default:
+                console.log('[POLL] Unknown intent:', result.pollType);
                 await callback({
                     text: "I'm not sure what you'd like to do with the poll. Please specify create, results, close, or list.",
                     action: "POLL"
                 });
         }
+        console.log('[POLL] Handler execution completed');
     },
     examples: []
 };

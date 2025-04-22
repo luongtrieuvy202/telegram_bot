@@ -191,14 +191,6 @@ export const memberReportAction: Action = {
     description: "Generate reports about new group members",
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
         if (!state.handle) return false
-        await runtime.messageManager.createMemory({
-            content: {
-                text: message.content.text
-            },
-            roomId: message.roomId,
-            userId: message.userId,
-            agentId: message.agentId
-        });
 
         const isMemberReport = await detectMemberReportIntent(runtime, message);
         return isMemberReport;
@@ -214,6 +206,15 @@ export const memberReportAction: Action = {
         try {
             const ctx = options.ctx as Context<Update>;
             const groupId = ctx.chat.id.toString();
+
+            await runtime.messageManager.createMemory({
+                content: {
+                    text: message.content.text
+                },
+                roomId: message.roomId,
+                userId: message.userId,
+                agentId: message.agentId
+            });
 
             const {startTime, period} = await extractTimePeriod(runtime, message);
             console.log(startTime, period)

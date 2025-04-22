@@ -68,20 +68,11 @@ export const sendToGroupAction: Action = {
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
         if (!state?.handle) return false;
 
-        await runtime.messageManager.createMemory({
-            roomId: message.roomId,
-            userId: message.userId,
-            agentId: message.agentId,
-            content: {
-                text: message.content.text,
-                type: "text"
-            }
-        })
 
         // Get recent messages for context
         const recentMessages = await runtime.messageManager.getMemories({
             roomId: message.roomId,
-            count: 5
+            count: 4
         });
 
         // Create context for AI analysis
@@ -132,22 +123,26 @@ export const sendToGroupAction: Action = {
         // Get conversation state
         const conversationState = await getConversationState(runtime, message.roomId);
 
-        // Get user's groups from Redis first
-        const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
+        console.log('[SEND_TO_GROUP] Fetching recent messages for context');
+        const recentMessages = await runtime.messageManager.getMemories({
+            roomId: message.roomId,
+            count: 5
+        });
 
-        // Analyze the current message and context
+        console.log('[SEND_TO_GROUP] Fetching user groups from Redis');
+        const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
+        console.log('[SEND_TO_GROUP] Found groups:', groupInfos.map(g => g.title).join(', '));
+
+        console.log('[SEND_TO_GROUP] Analyzing message for specific action');
         const analysis = await generateText({
             runtime,
             context: `You are a JSON-only response bot. Your task is to analyze a message in the context of sending a message to a group.
-            Current state: ${conversationState ? JSON.stringify(conversationState) : 'initial'}
-            Message: ${message.content.text}
-            Available groups: ${groupInfos.map(g => g.title).join(', ')}
             
-            IMPORTANT: A confirmation is ONLY when the user explicitly agrees to send a message that has already been specified.
-            For example:
-            - If user says "yes" or "send it" after being shown a message to send -> isConfirmation = true
-            - If user provides a new message or group -> isConfirmation = false
-            - If user starts a new request -> isConfirmation = false
+            Recent conversation:
+            ${recentMessages.map(m => m.content.text).join('\n')}
+            
+            Current message: ${message.content.text}
+            Available groups: ${groupInfos.map(g => g.title).join(', ')}
             
             Return ONLY a JSON object with the following structure, no other text:
             {
@@ -157,8 +152,26 @@ export const sendToGroupAction: Action = {
                 "isConfirmation": boolean, // ONLY true if user explicitly confirms sending an already specified message
                 "nextAction": string, // what the bot should do next
                 "response": string // the exact message the bot should respond with
-            }`,
+            }
+
+            Additional guidelines:
+            - Consider the recent conversation context when determining intent
+            - If the user has been discussing a specific group, prioritize that group
+            - If the user has been providing a message, look for it in the conversation
+            - If the user has been canceling frequently, be more explicit about the cancelation
+            - If the user has been confirming frequently, be more explicit about the confirmation
+            - If the user has been providing multiple messages, use the most recent one
+            `,
             modelClass: ModelClass.SMALL
+        });
+
+        await runtime.messageManager.createMemory({
+            content: {
+                text: message.content.text
+            },
+            roomId: message.roomId,
+            userId: message.userId,
+            agentId: message.agentId
         });
 
         console.log('Handler analysis response:', analysis);
