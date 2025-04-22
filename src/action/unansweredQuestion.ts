@@ -221,6 +221,7 @@ export const unansweredQuestionAction: Action = {
             case 'find_all':
                 console.log('[UNANSWERED_QUESTIONS] Processing find_all intent');
                 const allResponses = await getUserGroupMessages(ctx.message.from.id);
+                console.log('[UNANSWERED_QUESTIONS] All responses:', allResponses);
                 console.log('[UNANSWERED_QUESTIONS] Fetched messages from', Object.keys(allResponses).length, 'groups');
 
                 const allUnanswered = [];

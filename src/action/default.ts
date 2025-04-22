@@ -49,13 +49,6 @@ export const defaultAction: Action = {
         console.log('[DEFAULT] Starting handler execution');
         const ctx = options.ctx as Context<Update>;
 
-        console.log('[DEFAULT] Fetching recent messages for context');
-        const recentMessages = await runtime.messageManager.getMemories({
-            roomId: message.roomId,
-            count: 5
-        });
-
-        console.log('[DEFAULT] Creating memory for current message');
         await runtime.messageManager.createMemory({
             content: {
                 text: message.content.text
@@ -69,11 +62,7 @@ export const defaultAction: Action = {
         const analysis = await generateText({
             runtime,
             context: `You are a JSON-only response bot. Your task is to analyze a message and determine how to respond in a conversational way while staying focused on your role as a group management assistant.
-            
-            Recent conversation:
-            ${recentMessages.map(m => m.content.text).join('\n')}
-            
-            Current message: ${message.content.text}
+            Message: ${message.content.text}
             
             Return ONLY a JSON object with the following structure, no other text:
             {
@@ -110,9 +99,6 @@ export const defaultAction: Action = {
             - Focus on your role as a group management assistant
             - If asked about capabilities, provide detailed explanations
             - If asked about personal topics, politely redirect to your features
-            - Consider the recent conversation context when generating responses
-            - If the user has been asking about a specific feature, focus on that
-            - If the conversation has been going on for a while, suggest features more proactively
 
             Always set suggestFeatures to true for "greeting" and "confused" intents.
             For "small_talk", set suggestFeatures to true if the conversation has gone on for more than 2 exchanges.

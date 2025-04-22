@@ -189,11 +189,7 @@ export const pollAction: Action = {
         console.log('[POLL] Starting handler execution');
         const ctx = options.ctx as Context<Update>;
 
-        console.log('[POLL] Fetching recent messages for context');
-        const recentMessages = await runtime.messageManager.getMemories({
-            roomId: message.roomId,
-            count: 5
-        });
+        
 
         console.log('[POLL] Fetching user groups from Redis');
         const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
@@ -203,11 +199,7 @@ export const pollAction: Action = {
         const analysis = await generateText({
             runtime,
             context: `You are a JSON-only response bot. Your task is to analyze a message in the context of poll management.
-            
-            Recent conversation:
-            ${recentMessages.map(m => m.content.text).join('\n')}
-            
-            Current message: ${message.content.text}
+            Message: ${message.content.text}
             Available groups: ${groupInfos.map(g => g.title).join(', ')}
             
             Return ONLY a JSON object with the following structure, no other text:
@@ -220,15 +212,7 @@ export const pollAction: Action = {
                 },
                 "pollId": string, // only if pollType is "results" or "close"
                 "response": string // the exact message the bot should respond with
-            }
-
-            Additional guidelines:
-            - Consider the recent conversation context when determining poll type
-            - If the user has been discussing a specific group, prioritize that group
-            - If the user has been creating polls, look for question and options in the conversation
-            - If the user has been checking results, look for poll IDs in the conversation
-            - If the user has been canceling frequently, be more explicit about the cancelation
-            `,
+            }`,
             modelClass: ModelClass.SMALL
         });
 

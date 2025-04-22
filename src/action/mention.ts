@@ -215,10 +215,21 @@ export const mentionAction: Action = {
                 }
 
                 console.log('[MENTION] Fetching messages for group:', targetGroup.title);
-                const messages = await redis.lrange(`group_messages:${targetGroup.id}`, 0, -1);
-                const parsedLastMessages = messages.map(msg => JSON.parse(msg));
-                const mentions = parsedLastMessages.filter(msg =>
-                    msg.text.includes(`@${ctx.from.username}`)
+                // Get message IDs from sorted set
+                const messageIds = await redis.zrevrange(`group:${targetGroup.id}:messages`, 0, -1);
+                console.log('[MENTION] Found message IDs:', messageIds);
+
+                // Get message contents from hashes
+                const messages = [];
+                for (const messageId of messageIds) {
+                    const messageData = await redis.hgetall(`group:${targetGroup.id}:message:${messageId}`);
+                    if (messageData) {
+                        messages.push(messageData);
+                    }
+                }
+
+                const mentions = messages.filter(msg =>
+                    msg.text && msg.text.includes(`@${ctx.from.username}`)
                 );
 
                 console.log('[MENTION] Found mentions:', mentions.length);
@@ -238,8 +249,21 @@ export const mentionAction: Action = {
 
                 console.log('[MENTION] Generated response text for', mentions.length, 'mentions');
 
+                // Remove mentioned messages from Redis
+                for (const mention of mentions) {
+                    console.log('[MENTION] Removing mention from Redis:', JSON.stringify(mention));
+                    
+                    // Remove from sorted set
+                    await redis.zrem(`group:${targetGroup.id}:messages`, mention.id);
+                    
+                    // Remove from hash
+                    await redis.del(`group:${targetGroup.id}:message:${mention.id}`);
+                    
+                    console.log('[MENTION] Removed mention with ID:', mention.id);
+                }
+
                 await callback({
-                    text: `📋 *Mentions in ${targetGroup.title}*\n\n${mentionsText}\n\nTotal: ${mentions.length} mention${mentions.length === 1 ? '' : 's'}`,
+                    text: `📋 *Mentions in ${targetGroup.title}*\n\n${mentionsText}\n\nTotal: ${mentions.length} mention${mentions.length === 1 ? '' : 's'}\n\nThese mentions have been removed from the list.`,
                     action: "MENTION"
                 });
                 break;
@@ -250,10 +274,11 @@ export const mentionAction: Action = {
                 console.log('[MENTION] Fetched messages from', Object.keys(allResponses).length, 'groups');
 
                 const allMentions = [];
+                const mentionsToRemove = [];
 
                 for (const [groupId, groupData] of Object.entries(allResponses)) {
                     const mentions = (groupData as any).message.filter(msg =>
-                        msg.text.includes(`@${ctx.from.username}`)
+                        msg.text && msg.text.includes(`@${ctx.from.username}`)
                     );
 
                     if (mentions.length > 0) {
@@ -264,6 +289,8 @@ export const mentionAction: Action = {
                                 `${index + 1}. Message: "${m.text}"\n   From: ${m.username || 'Unknown'}\n   Posted: ${new Date(m.date).toLocaleString()}\n`
                             ).join('\n')
                         });
+                        // Store mentions for removal
+                        mentionsToRemove.push(...mentions.map(m => ({ groupId, message: m })));
                     }
                 }
 
@@ -285,8 +312,21 @@ export const mentionAction: Action = {
 
                 console.log('[MENTION] Generated response for', totalMentions, 'mentions across', allMentions.length, 'groups');
 
+                // Remove all mentioned messages from Redis
+                for (const { groupId, message } of mentionsToRemove) {
+                    console.log('[MENTION] Removing mention from Redis:', JSON.stringify(message));
+                    
+                    // Remove from sorted set
+                    await redis.zrem(`group:${groupId}:messages`, message.id);
+                    
+                    // Remove from hash
+                    await redis.del(`group:${groupId}:message:${message.id}`);
+                    
+                    console.log('[MENTION] Removed mention with ID:', message.id);
+                }
+
                 await callback({
-                    text: `📋 *Mentions Summary*\n\n${allMentionsText}\n\nTotal: ${totalMentions} mention${totalMentions === 1 ? '' : 's'} across ${allMentions.length} group${allMentions.length === 1 ? '' : 's'}`,
+                    text: `📋 *All Mentions Summary*\n\n${allMentionsText}\n\nTotal: ${totalMentions} mention${totalMentions === 1 ? '' : 's'} across ${allMentions.length} group${allMentions.length === 1 ? '' : 's'}\n\nThese mentions have been removed from the list.`,
                     action: "MENTION"
                 });
                 break;

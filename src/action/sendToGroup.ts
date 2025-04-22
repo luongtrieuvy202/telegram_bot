@@ -144,6 +144,12 @@ export const sendToGroupAction: Action = {
             Current message: ${message.content.text}
             Available groups: ${groupInfos.map(g => g.title).join(', ')}
             
+            IMPORTANT: A confirmation is ONLY when the user explicitly agrees to send a message that has already been specified.
+            For example:
+            - If user says "yes" or "send it" after being shown a message to send -> isConfirmation = true
+            - If user provides a new message or group -> isConfirmation = false
+            - If user starts a new request -> isConfirmation = false
+            
             Return ONLY a JSON object with the following structure, no other text:
             {
                 "intent": string, // "send_message", "select_group", "provide_message", "confirm", "cancel"
@@ -164,6 +170,7 @@ export const sendToGroupAction: Action = {
             `,
             modelClass: ModelClass.SMALL
         });
+
 
         await runtime.messageManager.createMemory({
             content: {
