@@ -5,6 +5,7 @@ import {
     elizaLogger,
     ServiceType,
     composeRandomUser,
+    generateText,
 } from "@elizaos/core";
 import {getEmbeddingZeroVector, Action} from '@elizaos/core';
 import {
@@ -1495,26 +1496,52 @@ export class MessageManager {
             };
 
             if (shouldRespond) {
-                const actionNames = ["SUMMARY", "MENTION_AUTO", "MENTION", "GROUP_RULES", "MEMBER_REPORT", "POLL", "SEND_TO_GROUP", "UNANSWERED_QUESTIONS"];
+                // First, analyze the message for potential actions
+                const analysis = await this._analyzeMessageForActions(memory, state);
+                
+                console.log(analysis)
+
                 let handled = false;
 
-                for (let action of this.runtime.actions.filter(a => actionNames.includes(a.name))) {
-                    if (!action) continue;
-                    state.handle = true
-                    const shouldHandle = await action.validate(this.runtime, memory, state);
-                    if (shouldHandle) {
-                        await action.handler(this.runtime, memory, state, {ctx,}, callback);
-                        handled = true;
-                        break;
-                        // Don't break here to allow the default action to handle if no other action did
+                if (!analysis.needsFullValidation && analysis.potentialActions.length > 0) {
+                    // Try the identified actions first
+                    for (const actionName of analysis.potentialActions) {
+                        const action = this.runtime.actions.find(a => a.name === actionName);
+                        if (!action) continue;
+
+                        state.handle = true;
+                        const shouldHandle = await action.validate(this.runtime, memory, state);
+                        
+                        if (shouldHandle) {
+                            await action.handler(this.runtime, memory, state, { ctx }, callback);
+                            handled = true;
+                            break;
+                        }
                     }
                 }
 
-                // If no action handled the message, use the default action
+                // If no action was handled, fall back to checking all actions
+                if (!handled) {
+                    const actionNames = ["SUMMARY", "MENTION_AUTO", "MENTION", "GROUP_RULES", 
+                                      "MEMBER_REPORT", "POLL", "SEND_TO_GROUP", "UNANSWERED_QUESTIONS"];
+                    
+                    for (let action of this.runtime.actions.filter(a => actionNames.includes(a.name))) {
+                        if (!action) continue;
+                        state.handle = true;
+                        const shouldHandle = await action.validate(this.runtime, memory, state);
+                        if (shouldHandle) {
+                            await action.handler(this.runtime, memory, state, { ctx }, callback);
+                            handled = true;
+                            break;
+                        }
+                    }
+                }
+
+                // If still no action handled, use default action
                 if (!handled) {
                     const defaultAction = this.runtime.actions.find(a => a.name === "DEFAULT");
                     if (defaultAction) {
-                        await defaultAction.handler(this.runtime, memory, state, {ctx}, callback);
+                        await defaultAction.handler(this.runtime, memory, state, { ctx }, callback);
                     }
                 }
             }
@@ -1525,6 +1552,245 @@ export class MessageManager {
             elizaLogger.error(error.stack)
             elizaLogger.error("❌ Error handling message:", error);
             elizaLogger.error("Error sending message:", error);
+        }
+    }
+
+    private async _analyzeMessageForActions(
+        message: Memory,
+        state: State
+    ): Promise<{
+        potentialActions: string[];
+        needsFullValidation: boolean;
+    }> {
+        const recentMessages = await this.runtime.messageManager.getMemories({
+            roomId: message.roomId,
+            count: 4
+        });
+
+        const context = {
+            recentMessages: recentMessages.map(m => m.content.text).join('\n'),
+            currentMessage: message.content.text,
+            availableActions: this.runtime.actions.map(a => ({
+                name: a.name,
+                description: a.description,
+                similes: a.similes
+            }))
+        };
+
+        const analysis = await generateText({
+            runtime: this.runtime,
+            context: `You are an action analysis bot. Your task is to analyze a message and identify which actions it might trigger.
+            
+            Recent conversation:
+            ${context.recentMessages}
+            
+            Current message: ${context.currentMessage}
+            
+            Available actions and their detailed triggers:
+            
+            1. SEND_TO_GROUP:
+               - Primary Keywords: "send", "message", "post"
+               - Secondary Keywords: "forward", "share", "broadcast"
+               - Common Patterns:
+                 * "Send [message] to [group]"
+                 * "Post this in [group]"
+                 * "Share with [group]"
+               - Context Indicators:
+                 * Group selection phase
+                 * Message content phase
+                 * Confirmation phase
+               - State Management:
+                 * Tracks conversation stage
+                 * Stores target group
+                 * Stores message content
+               - Validation Rules:
+                 * Must have group context
+                 * Must have message content
+                 * Must have confirmation
+            
+            2. POLL:
+               - Primary Keywords: "poll", "vote", "survey"
+               - Secondary Keywords: "questionnaire", "opinion", "feedback"
+               - Common Patterns:
+                 * "Create a poll about [topic]"
+                 * "Start a vote for [options]"
+                 * "Show poll results"
+               - Context Indicators:
+                 * Poll creation phase
+                 * Results viewing phase
+                 * Poll management phase
+               - State Management:
+                 * Tracks poll status
+                 * Stores poll options
+                 * Manages responses
+               - Validation Rules:
+                 * Must have poll question
+                 * Must have options
+                 * Must have target group
+            
+            3. MENTION:
+               - Primary Keywords: "@", "mention", "tag"
+               - Secondary Keywords: "notify", "alert", "ping"
+               - Common Patterns:
+                 * "Find mentions in [group]"
+                 * "Check who mentioned me"
+                 * "Show recent tags"
+               - Context Indicators:
+                 * Group-specific mentions
+                 * All-group mentions
+                 * Mention history
+               - State Management:
+                 * Tracks mention timeouts
+                 * Stores mention history
+                 * Manages unresponded mentions
+               - Validation Rules:
+                 * Must have group context
+                 * Must have time context
+                 * Must have mention type
+            
+            4. UNANSWERED_QUESTIONS:
+               - Primary Keywords: "unanswered", "question", "pending"
+               - Secondary Keywords: "follow up", "check", "review"
+               - Common Patterns:
+                 * "Find unanswered questions"
+                 * "Check pending questions"
+                 * "Show questions without answers"
+               - Context Indicators:
+                 * Group-specific questions
+                 * All-group questions
+                 * Question history
+               - State Management:
+                 * Tracks question status
+                 * Stores question history
+                 * Manages follow-ups
+               - Validation Rules:
+                 * Must have group context
+                 * Must have time context
+                 * Must have question type
+            
+            5. SUMMARY:
+               - Primary Keywords: "summary", "summarize", "recap"
+               - Secondary Keywords: "overview", "brief", "synopsis"
+               - Common Patterns:
+                 * "Summarize [group] chat"
+                 * "Give me a recap"
+                 * "Show recent activity"
+               - Context Indicators:
+                 * Group-specific summaries
+                 * Time-based summaries
+                 * Topic-based summaries
+               - State Management:
+                 * Tracks summary history
+                 * Stores summary content
+                 * Manages summary updates
+               - Validation Rules:
+                 * Must have group context
+                 * Must have time context
+                 * Must have summary type
+            
+            6. GROUP_RULES:
+               - Primary Keywords: "rules", "moderate", "enforce"
+               - Secondary Keywords: "guidelines", "policies", "restrictions"
+               - Common Patterns:
+                 * "Show group rules"
+                 * "Enforce rule [number]"
+                 * "Update moderation"
+               - Context Indicators:
+                 * Rule creation phase
+                 * Rule enforcement phase
+                 * Rule management phase
+               - State Management:
+                 * Tracks rule violations
+                 * Stores rule history
+                 * Manages rule updates
+               - Validation Rules:
+                 * Must have group context
+                 * Must have rule context
+                 * Must have action type
+            
+            7. MEMBER_REPORT:
+               - Primary Keywords: "report", "activity", "members"
+               - Secondary Keywords: "stats", "analytics", "participation"
+               - Common Patterns:
+                 * "Show member activity"
+                 * "Generate participation report"
+                 * "Check member stats"
+               - Context Indicators:
+                 * Group-specific reports
+                 * Time-based reports
+                 * Member-specific reports
+               - State Management:
+                 * Tracks member activity
+                 * Stores report history
+                 * Manages report updates
+               - Validation Rules:
+                 * Must have group context
+                 * Must have time context
+                 * Must have report type
+            
+            8. DEFAULT:
+               - Primary Keywords: None specific
+               - Secondary Keywords: None specific
+               - Common Patterns:
+                 * General conversation
+                 * Unclear intent
+                 * Fallback responses
+               - Context Indicators:
+                 * No specific action match
+                 * Ambiguous intent
+                 * General queries
+               - State Management:
+                 * Basic conversation tracking
+                 * General context storage
+                 * Default response handling
+               - Validation Rules:
+                 * No specific requirements
+                 * Fallback for other actions
+                 * General conversation handling
+            
+            Return ONLY a JSON object with the following structure:
+            {
+                "potentialActions": string[], // List of action names that might be triggered
+                "needsFullValidation": boolean, // True ONLY if no potential actions were found
+                "reasoning": string // Brief explanation of the analysis
+            }
+            
+            Guidelines for Analysis:
+            1. Consider both explicit keywords and implicit intent
+            2. Look for action-specific patterns and context
+            3. Consider recent conversation history
+            4. Set needsFullValidation to true ONLY if:
+               - No potential actions were found
+               - Message doesn't match any action patterns
+               - Message is completely unrelated to any action
+            5. Include actions with any level of confidence in potentialActions
+            6. Consider the conversation flow and context
+            7. Look for action-specific state indicators
+            8. Consider validation requirements
+            9. Check for conflicting intents
+            10. Evaluate action-specific patterns
+            
+            Confidence Scoring:
+            - High (0.8-1.0): Clear intent, strong patterns, specific context
+            - Medium (0.5-0.7): Some ambiguity, partial patterns, general context
+            - Low (0-0.4): Unclear intent, weak patterns, insufficient context
+            
+            IMPORTANT: Always include any potential actions in the potentialActions array, even if confidence is low. Only set needsFullValidation to true if you find NO potential actions at all.`,
+            modelClass: ModelClass.SMALL
+        });
+
+        try {
+            const result = JSON.parse(analysis);
+            return {
+                potentialActions: result.potentialActions,
+                needsFullValidation: result.needsFullValidation
+            };
+        } catch (error) {
+            console.error('Failed to parse action analysis:', error);
+            return {
+                potentialActions: [],
+                needsFullValidation: true
+            };
         }
     }
 }
