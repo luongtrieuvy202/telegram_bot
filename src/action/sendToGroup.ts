@@ -144,33 +144,53 @@ export const sendToGroupAction: Action = {
             Current message: ${message.content.text}
             Available groups: ${groupInfos.map(g => g.title).join(', ')}
             
-            IMPORTANT: A confirmation is ONLY when the user explicitly agrees to send a message that has already been specified.
-            For example:
-            - If user says "yes" or "send it" after being shown a message to send -> isConfirmation = true
-            - If user provides a new message or group -> isConfirmation = false
-            - If user starts a new request -> isConfirmation = false
-            
             Return ONLY a JSON object with the following structure, no other text:
             {
-                "intent": string, // "send_message", "select_group", "provide_message", "confirm", "cancel"
+                "intent": string, // "send_message", "select_group", "provide_message", "confirm", "cancel", "edit_message", "change_group"
                 "extractedGroup": string, // group name (not ID), must match one of the available groups
                 "extractedMessage": string, // message content if provided
-                "isConfirmation": boolean, // ONLY true if user explicitly confirms sending an already specified message
-                "nextAction": string, // what the bot should do next
+                "isConfirmation": boolean, // true if user explicitly confirms sending
+                "isEdit": boolean, // true if user wants to edit the message
+                "isGroupChange": boolean, // true if user wants to change the group
                 "response": string // the exact message the bot should respond with
             }
 
+            Rules for intent detection:
+            1. "send_message": When user provides both group and message
+            2. "select_group": When user only specifies a group
+            3. "provide_message": When user only provides message content
+            4. "confirm": When user explicitly agrees to send (yes, send, ok, etc.)
+            5. "cancel": When user wants to stop the process
+            6. "edit_message": When user wants to modify the message
+            7. "change_group": When user wants to change the target group
+
+            Rules for group extraction:
+            1. Match exact group names
+            2. Match partial group names if unique
+            3. If multiple matches, ask for clarification
+            4. If no match, list available groups
+
+            Rules for message extraction:
+            1. Use the most recent message if multiple provided
+            2. If message is edited, use the edited version
+            3. If message is unclear, ask for clarification
+
+            Rules for confirmation:
+            1. Must be explicit (yes, send, ok, etc.)
+            2. Must match the current message and group
+            3. If message/group changed, treat as new request
+
             Additional guidelines:
-            - Consider the recent conversation context when determining intent
-            - If the user has been discussing a specific group, prioritize that group
-            - If the user has been providing a message, look for it in the conversation
-            - If the user has been canceling frequently, be more explicit about the cancelation
-            - If the user has been confirming frequently, be more explicit about the confirmation
-            - If the user has been providing multiple messages, use the most recent one
+            - Consider the recent conversation context
+            - Handle partial information gracefully
+            - Provide clear next steps
+            - Confirm understanding before sending
+            - Allow easy cancellation
+            - Support message editing
+            - Support group changing
             `,
             modelClass: ModelClass.SMALL
         });
-
 
         await runtime.messageManager.createMemory({
             content: {
@@ -193,75 +213,76 @@ export const sendToGroupAction: Action = {
             return;
         }
 
-        // Find the target group by name (not ID)
-        const targetGroup = groupInfos.find(group =>
-            group.title?.toLowerCase() === result.extractedGroup?.toLowerCase()
-        );
+        console.log('[SEND_TO_GROUP] Processing intent:', result.intent);
 
-        // If this is a confirmation and we have a message to send, send it
-        if (result.isConfirmation) {
-            // Additional validation to ensure this is really a confirmation
-            if (!conversationState?.messageContent || !conversationState?.targetGroup) {
-                console.log('Invalid confirmation state:', conversationState);
-                await callback({
-                    text: "I don't have a message to send. What would you like to send?",
-                    action: "SEND_TO_GROUP"
-                });
-                return;
-            }
-
-            // Check if the message contains confirmation words
-            const confirmationWords = ['yes', 'send', 'okay', 'ok', 'go ahead', 'proceed', 'confirm'];
-            const isExplicitConfirmation = confirmationWords.some(word =>
-                message.content.text.toLowerCase().includes(word)
-            );
-
-            if (!isExplicitConfirmation) {
-                console.log('Not an explicit confirmation:', message.content.text);
-                await callback({
-                    text: "I need an explicit confirmation to send the message. Please say 'yes' or 'send it' to proceed.",
-                    action: "SEND_TO_GROUP"
-                });
-                return;
-            }
-
-            try {
-                await bot.telegram.sendMessage(
-                    conversationState.targetGroup.id,
-                    conversationState.messageContent
-                );
-
-                // Log the message in Redis
-                const messageId = Date.now().toString();
-                await redis.multi()
-                    .hset(`group:${conversationState.targetGroup.id}:message:${messageId}`, {
-                        id: messageId,
-                        from: ctx.from.id.toString(),
-                        text: conversationState.messageContent,
-                        date: Date.now().toString(),
-                        username: ctx.from.username || ctx.from.first_name
-                    })
-                    .zadd(`group:${conversationState.targetGroup.id}:messages`, Date.now(), messageId)
-                    .exec();
-
-                await callback({
-                    text: result.response || `Message sent successfully to ${conversationState.targetGroup.title}!`,
-                    action: "SEND_TO_GROUP"
-                });
-
-                await clearConversationState(runtime, message.roomId);
-                return;
-            } catch (error) {
-                await callback({
-                    text: `Failed to send message: ${error.message}`,
-                    action: "SEND_TO_GROUP"
-                });
-                return;
-            }
-        }
+        // Declare variables at the top of the switch
+        let targetGroup;
+        let messageContent;
 
         switch (result.intent) {
             case 'send_message':
+                // Handle case where user provides both group and message
+                if (result.extractedGroup) {
+                    const foundGroup = groupInfos.find(group =>
+                        group.title?.toLowerCase() === result.extractedGroup?.toLowerCase()
+                    );
+                    if (foundGroup) {
+                        targetGroup = {
+                            id: foundGroup.id || '',
+                            title: foundGroup.title || ''
+                        };
+                    }
+                }
+
+                if (!targetGroup) {
+                    await callback({
+                        text: result.response || "Please specify which group you want to send the message to.",
+                        action: "SEND_TO_GROUP"
+                    });
+                    return;
+                }
+
+                messageContent = result.extractedMessage || message.content.text;
+                if (!messageContent) {
+                    await callback({
+                        text: result.response || "Please provide the message you want to send.",
+                        action: "SEND_TO_GROUP"
+                    });
+                    return;
+                }
+
+                // Store state and ask for confirmation
+                await setConversationState(runtime, message.roomId, {
+                    stage: 'confirmation',
+                    targetGroup,
+                    messageContent
+                });
+
+                await callback({
+                    text: result.response || `I'll help you send this message to ${targetGroup.title}:\n\n"${messageContent}"\n\nWould you like me to proceed with sending this message?`,
+                    action: "SEND_TO_GROUP"
+                });
+                break;
+
+            case 'select_group':
+                if (!result.extractedGroup) {
+                    await callback({
+                        text: result.response || "Please specify which group you want to send the message to.",
+                        action: "SEND_TO_GROUP"
+                    });
+                    return;
+                }
+
+                const foundGroup = groupInfos.find(group =>
+                    group.title?.toLowerCase() === result.extractedGroup?.toLowerCase()
+                );
+                if (foundGroup) {
+                    targetGroup = {
+                        id: foundGroup.id || '',
+                        title: foundGroup.title || ''
+                    };
+                }
+
                 if (!targetGroup) {
                     await callback({
                         text: result.response || `I couldn't find the group "${result.extractedGroup}". Here are the groups you have access to:\n${groupInfos.map(g => g.title).join('\n')}`,
@@ -270,44 +291,10 @@ export const sendToGroupAction: Action = {
                     return;
                 }
 
-                // Check if the group is authorized
-                const config = runtime.character.clientConfig?.telegram;
-                if (config?.shouldOnlyJoinInAllowedGroups) {
-                    const allowedGroups = config.allowedGroupIds || [];
-                    if (!allowedGroups.includes(targetGroup.id)) {
-                        await callback({
-                            text: result.response || `Group "${targetGroup.title}" is not authorized.`,
-                            action: "SEND_TO_GROUP"
-                        });
-                        return;
-                    }
-                }
-
-                // If message is already provided, go straight to confirmation
-                if (result.extractedMessage) {
-                    await setConversationState(runtime, message.roomId, {
-                        stage: 'confirmation',
-                        targetGroup: {
-                            id: targetGroup.id,
-                            title: targetGroup.title || ''
-                        },
-                        messageContent: result.extractedMessage
-                    });
-
-                    await callback({
-                        text: result.response || `I'll help you send this message to ${targetGroup.title}:\n\n"${result.extractedMessage}"\n\nWould you like me to proceed with sending this message?`,
-                        action: "SEND_TO_GROUP"
-                    });
-                    return;
-                }
-
                 // If no message provided, ask for it
                 await setConversationState(runtime, message.roomId, {
                     stage: 'message_collection',
-                    targetGroup: {
-                        id: targetGroup.id,
-                        title: targetGroup.title || ''
-                    }
+                    targetGroup
                 });
 
                 await callback({
@@ -325,14 +312,84 @@ export const sendToGroupAction: Action = {
                     return;
                 }
 
+                messageContent = result.extractedMessage || message.content.text;
                 await setConversationState(runtime, message.roomId, {
                     ...conversationState,
                     stage: 'confirmation',
-                    messageContent: result.extractedMessage || message.content.text
+                    messageContent
                 });
 
                 await callback({
-                    text: result.response || `I'll help you send this message to ${conversationState.targetGroup.title}:\n\n"${result.extractedMessage || message.content.text}"\n\nWould you like me to proceed with sending this message?`,
+                    text: result.response || `I'll help you send this message to ${conversationState.targetGroup.title}:\n\n"${messageContent}"\n\nWould you like me to proceed with sending this message?`,
+                    action: "SEND_TO_GROUP"
+                });
+                break;
+
+            case 'edit_message':
+                if (!conversationState?.targetGroup) {
+                    await callback({
+                        text: result.response || "Please specify which group you want to send the message to first.",
+                        action: "SEND_TO_GROUP"
+                    });
+                    return;
+                }
+
+                messageContent = result.extractedMessage || message.content.text;
+                await setConversationState(runtime, message.roomId, {
+                    ...conversationState,
+                    stage: 'confirmation',
+                    messageContent
+                });
+
+                await callback({
+                    text: result.response || `I've updated the message. Here's what will be sent to ${conversationState.targetGroup.title}:\n\n"${messageContent}"\n\nWould you like me to proceed with sending this message?`,
+                    action: "SEND_TO_GROUP"
+                });
+                break;
+
+            case 'change_group':
+                if (!result.extractedGroup) {
+                    await callback({
+                        text: result.response || "Please specify which group you want to send the message to.",
+                        action: "SEND_TO_GROUP"
+                    });
+                    return;
+                }
+
+                const newGroup = groupInfos.find(group =>
+                    group.title?.toLowerCase() === result.extractedGroup?.toLowerCase()
+                );
+                if (newGroup) {
+                    targetGroup = {
+                        id: newGroup.id || '',
+                        title: newGroup.title || ''
+                    };
+                }
+
+                if (!targetGroup) {
+                    await callback({
+                        text: result.response || `I couldn't find the group "${result.extractedGroup}". Here are the groups you have access to:\n${groupInfos.map(g => g.title).join('\n')}`,
+                        action: "SEND_TO_GROUP"
+                    });
+                    return;
+                }
+
+                if (!conversationState?.messageContent) {
+                    await callback({
+                        text: result.response || "Please provide the message you want to send.",
+                        action: "SEND_TO_GROUP"
+                    });
+                    return;
+                }
+
+                await setConversationState(runtime, message.roomId, {
+                    ...conversationState,
+                    stage: 'confirmation',
+                    targetGroup
+                });
+
+                await callback({
+                    text: result.response || `I'll help you send this message to ${targetGroup.title}:\n\n"${conversationState.messageContent}"\n\nWould you like me to proceed with sending this message?`,
                     action: "SEND_TO_GROUP"
                 });
                 break;
@@ -343,6 +400,76 @@ export const sendToGroupAction: Action = {
                     text: result.response || "Message sending cancelled. Let me know if you'd like to try again.",
                     action: "SEND_TO_GROUP"
                 });
+                break;
+
+            case 'confirm':
+                // Try to get message and group from conversation state first
+                let messageToSend = conversationState?.messageContent;
+                let groupToSend = conversationState?.targetGroup;
+
+                // If conversation state is invalid, try to get data from AI response
+                if (!messageToSend || !groupToSend) {
+                    console.log('Invalid conversation state, trying to use AI response data');
+                    
+                    // Try to find the group from AI response
+                    if (result.extractedGroup) {
+                        const foundGroup = groupInfos.find(group =>
+                            group.title?.toLowerCase() === result.extractedGroup?.toLowerCase()
+                        );
+                        if (foundGroup) {
+                            groupToSend = {
+                                id: foundGroup.id || '',
+                                title: foundGroup.title || ''
+                            };
+                        }
+                    }
+
+                    // Use message from AI response or current message
+                    messageToSend = result.extractedMessage || message.content.text;
+
+                    // If we still don't have both required pieces, return error
+                    if (!messageToSend || !groupToSend) {
+                        console.log('Missing required data for sending message');
+                        await callback({
+                            text: result.response || "I need both a group and a message to send. Please specify them.",
+                            action: "SEND_TO_GROUP"
+                        });
+                        return;
+                    }
+                }
+
+                try {
+                    await bot.telegram.sendMessage(
+                        groupToSend.id,
+                        messageToSend
+                    );
+
+                    // Log the message in Redis
+                    const messageId = Date.now().toString();
+                    await redis.multi()
+                        .hset(`group:${groupToSend.id}:message:${messageId}`, {
+                            id: messageId,
+                            from: ctx.from.id.toString(),
+                            text: messageToSend,
+                            date: Date.now().toString(),
+                            username: ctx.from.username || ctx.from.first_name
+                        })
+                        .zadd(`group:${groupToSend.id}:messages`, Date.now(), messageId)
+                        .exec();
+
+                    await callback({
+                        text: result.response || `Message sent successfully to ${groupToSend.title}!`,
+                        action: "SEND_TO_GROUP"
+                    });
+
+                    await clearConversationState(runtime, message.roomId);
+                } catch (error) {
+                    console.error('Error sending message:', error);
+                    await callback({
+                        text: result.response || `Failed to send message: ${error.message}`,
+                        action: "SEND_TO_GROUP"
+                    });
+                }
                 break;
 
             default:

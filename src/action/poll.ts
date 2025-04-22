@@ -130,6 +130,8 @@ export const pollAction: Action = {
             count: 5
         });
 
+        console.log('[POLL] Recent messages:', recentMessages);
+
         console.log('[POLL] Creating context for AI analysis');
         const context = {
             recentMessages: recentMessages.map(m => m.content.text).join('\n'),
