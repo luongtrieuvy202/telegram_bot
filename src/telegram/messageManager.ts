@@ -1525,23 +1525,6 @@ export class MessageManager {
                     }
                 }
 
-                // If no action was handled, fall back to checking all actions
-                // if (!handled) {
-                //     const actionNames = ["SUMMARY", "MENTION_AUTO", "MENTION", "GROUP_RULES", 
-                //                       "MEMBER_REPORT", "POLL", "SEND_TO_GROUP", "UNANSWERED_QUESTIONS"];
-                    
-                //     for (let action of this.runtime.actions.filter(a => actionNames.includes(a.name))) {
-                //         if (!action) continue;
-                //         state.handle = true;
-                //         const shouldHandle = await action.validate(this.runtime, memory, state);
-                //         if (shouldHandle) {
-                //             await action.handler(this.runtime, memory, state, { ctx }, callback);
-                //             handled = true;
-                //             break;
-                //         }
-                //     }
-                // }
-
                 // If still no action handled, use default action
                 if (!handled) {
                     const defaultAction = this.runtime.actions.find(a => a.name === "DEFAULT");
@@ -1584,7 +1567,7 @@ export class MessageManager {
 
         const analysis = await generateText({
             runtime: this.runtime,
-            context: `You are an action analysis bot. Your task is to analyze a message and identify which actions it might trigger.
+            context: `You are an action analysis bot. Your task is to analyze a message and identify the SINGLE most likely action it might trigger.
             
             Recent conversation:
             ${context.recentMessages}
@@ -1755,9 +1738,9 @@ export class MessageManager {
             
             Return ONLY a JSON object with the following structure:
             {
-                "potentialActions": string[], // List of action names that might be triggered
-                "needsFullValidation": boolean, // True ONLY if no potential actions were found
-                "reasoning": string // Brief explanation of the analysis
+                "potentialActions": string[], // List containing ONLY the single highest confidence action
+                "needsFullValidation": boolean, // True ONLY if no action matches with confidence > 0.5
+                "reasoning": string // Brief explanation of why this action was chosen
             }
             
             Guidelines for Analysis:
@@ -1765,10 +1748,10 @@ export class MessageManager {
             2. Look for action-specific patterns and context
             3. Consider recent conversation history
             4. Set needsFullValidation to true ONLY if:
-               - No potential actions were found
+               - No action matches with confidence > 0.5
                - Message doesn't match any action patterns
                - Message is completely unrelated to any action
-            5. Include actions with any level of confidence in potentialActions
+            5. Include ONLY the highest confidence action in potentialActions
             6. Consider the conversation flow and context
             7. Look for action-specific state indicators
             8. Consider validation requirements
@@ -1780,7 +1763,11 @@ export class MessageManager {
             - Medium (0.5-0.7): Some ambiguity, partial patterns, general context
             - Low (0-0.4): Unclear intent, weak patterns, insufficient context
             
-            IMPORTANT: Always include any potential actions in the potentialActions array, even if confidence is low. Only set needsFullValidation to true if you find NO potential actions at all.`,
+            IMPORTANT: 
+            1. Return ONLY the single highest confidence action in potentialActions
+            2. Only include an action if its confidence is > 0.5
+            3. If no action has confidence > 0.5, return an empty array and set needsFullValidation to true
+            4. If multiple actions have the same highest confidence, choose the one that best matches the current context`,
             modelClass: ModelClass.SMALL
         });
 

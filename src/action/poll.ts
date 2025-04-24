@@ -33,6 +33,14 @@ interface Poll {
     createdAt: number;
 }
 
+interface PollState {
+    stage: 'initial' | 'confirmation' | 'creation';
+    pollDetails?: {
+        question: string;
+        options: string[];
+        targetGroup: string;
+    };
+}
 
 // Helper function to extract JSON from text response
 function extractJsonFromResponse(text: string): any {
@@ -45,6 +53,25 @@ function extractJsonFromResponse(text: string): any {
         console.error('Error parsing JSON:', error);
     }
     return null;
+}
+
+async function getPollState(runtime: IAgentRuntime, roomId: string): Promise<PollState | null> {
+    const state = await runtime.cacheManager.get(`poll:${roomId}`);
+    if (!state) return null;
+    try {
+        return JSON.parse(state as string) as PollState;
+    } catch (error) {
+        console.error('Failed to parse poll state:', error);
+        return null;
+    }
+}
+
+async function setPollState(runtime: IAgentRuntime, roomId: string, state: PollState) {
+    await runtime.cacheManager.set(`poll:${roomId}`, JSON.stringify(state));
+}
+
+async function clearPollState(runtime: IAgentRuntime, roomId: string) {
+    await runtime.cacheManager.delete(`poll:${roomId}`);
 }
 
 export async function handlePollCallback(ctx: Context<Update>): Promise<void> {
@@ -123,62 +150,17 @@ export const pollAction: Action = {
             return false;
         }
 
+        // Get current poll state
+        const pollState = await getPollState(runtime, message.roomId);
+        
+        // If we're in confirmation stage, check if the message is a confirmation
+        if (pollState?.stage === 'confirmation') {
+            const isConfirmation = message.content.text.toLowerCase().includes('yes') || 
+                                 message.content.text.toLowerCase().includes('confirm') ||
+                                 message.content.text.toLowerCase().includes('create');
+            return isConfirmation;
+        }
 
-        // console.log('[POLL] Fetching recent messages for context');
-        // const recentMessages = await runtime.messageManager.getMemories({
-        //     roomId: message.roomId,
-        //     count: 5
-        // });
-
-        // console.log('[POLL] Recent messages:', recentMessages);
-
-        // console.log('[POLL] Creating context for AI analysis');
-        // const context = {
-        //     recentMessages: recentMessages.map(m => m.content.text).join('\n'),
-        //     currentMessage: message.content.text,
-        //     currentState: state
-        // };
-
-        // console.log('[POLL] Analyzing intent with AI');
-        // const analysis = await generateText({
-        //     runtime,
-        //     context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to manage polls.
-        //     IMPORTANT: This is ONLY for poll management, NOT for summarizing, sending messages, or finding mentions.
-            
-        //     Recent messages: ${context.recentMessages}
-        //     Current message: ${context.currentMessage}
-            
-        //     Return ONLY a JSON object with the following structure, no other text:
-        //     {
-        //         "hasIntent": boolean, // true ONLY if user wants to manage polls
-        //         "pollType": string, // "create", "results", "close", "list", or null
-        //         "confidence": number, // confidence score of the analysis
-        //         "groupName": string, // name of the group if specified
-        //         "pollDetails": { // only if pollType is "create"
-        //             "question": string,
-        //             "options": string[]
-        //         }
-        //     }`,
-        //     modelClass: ModelClass.SMALL
-        // });
-
-        // console.log('[POLL] AI Analysis response:', analysis);
-
-        // const result = extractJsonFromResponse(analysis);
-        // if (!result) {
-        //     console.error('[POLL] Failed to extract valid JSON from analysis');
-        //     return false;
-        // }
-
-        // console.log('[POLL] Analysis result:', JSON.stringify(result, null, 2));
-
-        // if (!result.hasIntent || result.confidence < 0.7) {
-        //     console.log('[POLL] Low confidence or no intent found');
-        //     return false;
-        // }
-
-        // console.log('[POLL] Validation successful:', result.hasIntent);
-        // return result.hasIntent;
         return true;
     },
     suppressInitialMessage: true,
@@ -192,11 +174,50 @@ export const pollAction: Action = {
         console.log('[POLL] Starting handler execution');
         const ctx = options.ctx as Context<Update>;
 
-        
+        // Get current poll state
+        const pollState = await getPollState(runtime, message.roomId);
 
         console.log('[POLL] Fetching user groups from Redis');
         const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
         console.log('[POLL] Found groups:', groupInfos.map(g => g.title).join(', '));
+
+        // If we're in confirmation stage and user confirmed, create the poll
+        if (pollState?.stage === 'confirmation' && pollState.pollDetails) {
+            const isConfirmation = message.content.text.toLowerCase().includes('yes') || 
+                                 message.content.text.toLowerCase().includes('confirm') ||
+                                 message.content.text.toLowerCase().includes('create');
+            
+            if (isConfirmation) {
+                const targetGroup = groupInfos.find(group =>
+                    group.title?.toLowerCase() === pollState.pollDetails.targetGroup?.toLowerCase()
+                );
+
+                if (!targetGroup) {
+                    await callback({
+                        text: `I couldn't find the group "${pollState.pollDetails.targetGroup}". Here are the groups you have access to:\n${groupInfos.map(g => g.title).join('\n')}`,
+                        action: "POLL"
+                    });
+                    await clearPollState(runtime, message.roomId);
+                    return;
+                }
+
+                await handlePollCreate(
+                    ctx,
+                    parseInt(targetGroup.id),
+                    pollState.pollDetails.question,
+                    pollState.pollDetails.options
+                );
+                await clearPollState(runtime, message.roomId);
+                return;
+            } else {
+                await callback({
+                    text: "Poll creation cancelled. Let me know if you'd like to try again.",
+                    action: "POLL"
+                });
+                await clearPollState(runtime, message.roomId);
+                return;
+            }
+        }
 
         console.log('[POLL] Analyzing message for specific action');
         const analysis = await generateText({
@@ -252,23 +273,40 @@ export const pollAction: Action = {
                 if (!targetGroup) {
                     console.log('[POLL] Target group not found:', result.targetGroup);
                     await callback({
-                        text: `I couldn't find the group "${result.targetGroup}". Here are the groups you have access to:\n${groupInfos.map(g => g.title).join('\n')}`,
+                        text: `${result.response}`,
                         action: "POLL"
                     });
                     return;
                 }
 
                 if (!result.pollDetails?.question || !result.pollDetails?.options?.length) {
-                    console.log('[POLL] Missing poll details');
                     await callback({
-                        text: "I need both a question and at least two options to create a poll. Please provide them.",
+                        text: "Please provide both a question and options for the poll.",
                         action: "POLL"
                     });
                     return;
                 }
 
-                console.log('[POLL] Creating poll with details:', JSON.stringify(result.pollDetails));
-                await handlePollCreate(ctx, parseInt(targetGroup.id), result.pollDetails.question, result.pollDetails.options);
+                // Store poll details and show confirmation message
+                await setPollState(runtime, message.roomId, {
+                    stage: 'confirmation',
+                    pollDetails: {
+                        question: result.pollDetails.question,
+                        options: result.pollDetails.options,
+                        targetGroup: targetGroup.title
+                    }
+                });
+
+                const confirmationMessage = `I'll create a poll with the following details:\n\n` +
+                    `Question: ${result.pollDetails.question}\n\n` +
+                    `Options:\n${result.pollDetails.options.map((opt, i) => `${i + 1}. ${opt}`).join('\n')}\n\n` +
+                    `Group: ${targetGroup.title}\n\n` +
+                    `Please confirm by typing 'yes' or 'confirm' to create this poll, or 'no' to cancel.`;
+
+                await callback({
+                    text: confirmationMessage,
+                    action: "POLL"
+                });
                 break;
 
             case 'results':
@@ -371,7 +409,7 @@ async function handlePollCreate(ctx: Context<Update>, groupId: number, question:
         });
 
         // Send private message to the creator with poll details
-        const privateMessage = `📊 Your poll has been created!\n\nQuestion: ${question}\nGroup: @${groupInfo.title}\nPoll ID: ${poll.id}\n\nUse these commands to manage your poll:\n/poll results ${poll.id} - View results\n/poll close ${poll.id} - Close the poll`;
+        const privateMessage = `📊 Your poll has been created!\n\nQuestion: ${question}\nGroup: @${groupInfo.title}\nPoll ID: ${poll.id}\n`;
         await ctx.reply(privateMessage);
     } catch (error) {
         await ctx.reply(`Failed to create poll in @${groupInfo.title}. Make sure the bot is a member of the group and has permission to send messages.`);

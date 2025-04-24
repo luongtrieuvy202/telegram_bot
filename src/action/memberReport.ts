@@ -191,9 +191,6 @@ export const memberReportAction: Action = {
     description: "Generate reports about new group members",
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
         if (!state.handle) return false
-
-        // const isMemberReport = await detectMemberReportIntent(runtime, message);
-        // return isMemberReport;
         return true;
     },
     suppressInitialMessage: true,

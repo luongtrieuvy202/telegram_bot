@@ -44,66 +44,6 @@ export const unansweredQuestionAction: Action = {
             return false;
         }
         return true;
-        // console.log('[UNANSWERED_QUESTIONS] Starting validation check');
-        // if (!state?.handle) {
-        //     console.log('[UNANSWERED_QUESTIONS] Validation failed: No state handle found');
-        //     return false;
-        // }
-
-        // console.log('[UNANSWERED_QUESTIONS] Creating memory for message');
-
-        // console.log('[UNANSWERED_QUESTIONS] Fetching recent messages for context');
-        // const recentMessages = await runtime.messageManager.getMemories({
-        //     roomId: message.roomId,
-        //     count: 2
-        // });
-
-        // const context = {
-        //     recentMessages: recentMessages.map(m => m.content.text).join('\n'),
-        //     currentMessage: message.content.text,
-        //     currentState: state
-        // };
-
-        // console.log('[UNANSWERED_QUESTIONS] Analyzing intent with AI');
-        // const analysis = await generateText({
-        //     runtime,
-        //     context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to find unanswered questions in groups.
-        //     IMPORTANT: This is ONLY for finding unanswered questions, NOT for summarizing, sending messages, or finding mentions.
-            
-        //     Recent messages: ${context.recentMessages}
-        //     Current message: ${context.currentMessage}
-            
-        //     Return ONLY a JSON object with the following structure, no other text:
-        //     {
-        //         "hasIntent": boolean, // true ONLY if user wants to find unanswered questions
-        //         "targetGroup": string, // name of the group to check (if specified)
-        //         "isAllGroups": boolean, // true if user wants to check all groups
-        //         "confidence": number, // confidence score of the analysis
-        //         "nextAction": string, // what the bot should do next
-        //         "isSummaryRequest": boolean, // true if this is actually a request to summarize
-        //         "isSendRequest": boolean, // true if this is actually a request to send a message
-        //         "isMentionRequest": boolean // true if this is actually a request to find mentions
-        //     }`,
-        //     modelClass: ModelClass.SMALL
-        // });
-
-        // console.log('[UNANSWERED_QUESTIONS] AI Analysis response:', analysis);
-
-        // const result = extractJsonFromResponse(analysis);
-        // if (!result) {
-        //     console.error('[UNANSWERED_QUESTIONS] Failed to extract valid JSON from analysis');
-        //     return false;
-        // }
-
-        // console.log('[UNANSWERED_QUESTIONS] Analysis result:', JSON.stringify(result, null, 2));
-
-        // if (result.isSummaryRequest || result.isSendRequest || result.isMentionRequest) {
-        //     console.log('[UNANSWERED_QUESTIONS] Request type mismatch - rejecting');
-        //     return false;
-        // }
-
-        // console.log('[UNANSWERED_QUESTIONS] Validation successful:', result.hasIntent);
-        // return result.hasIntent;
     },
     suppressInitialMessage: true,
     handler: async (

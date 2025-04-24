@@ -135,60 +135,6 @@ export const groupRulesAction: Action = {
     ] as ActionExample[][],
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State): Promise<boolean> => {
         if (!state.handle) return false
-
-        return true
-        // if (!message?.content?.text) return false;
-
-        // const prompt = `Analyze the following message to determine if it's about managing group rules.
-        // Consider if the user wants to:
-        // - Create a new rule
-        // - List existing rules
-        // - Delete a rule
-        // - Update a rule
-        
-        // Message: ${message.content.text}
-        
-        // Return a JSON object with:
-        // {
-        //     "is_rule_management": boolean,
-        //     "action": "create" | "list" | "delete" | "update",
-        //     "confidence": number,
-        //     "group_name": string,
-        //     "rule_details": {
-        //         "name": string,
-        //         "description": string,
-        //         "conditions": [
-        //             {
-        //                 "type": "contains" | "not_contains" | "starts_with" | "ends_with" | "matches_regex" | "length_greater" | "length_less",
-        //                 "value": string | number,
-        //                 "case_sensitive": boolean
-        //             }
-        //         ],
-        //         "action": "warn" | "mute" | "ban" | "kick",
-        //         "duration": number
-        //     }
-        // }
-
-        // For rule creation/update, ensure:
-        // - At least one condition is provided
-        // - Action is one of: warn, mute, ban, kick
-        // - Duration is optional and in minutes
-        // - Conditions have valid types and values
-        // - For length conditions, value must be a number
-        // - For regex conditions, value must be a valid regex pattern
-        // - For other conditions, value must be a string`;
-
-        // const response = await generateText({
-        //     runtime,
-        //     context: prompt,
-        //     modelClass: ModelClass.SMALL
-        // });
-
-        // const result = extractJsonFromResponse(response) as ValidationResult;
-        // if (!result || !result.is_rule_management || result.confidence < 0.7) {
-        //     return false;
-        // }
-
         return true;
     },
     handler: async (
