@@ -68,46 +68,47 @@ export const sendToGroupAction: Action = {
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
         if (!state?.handle) return false;
 
+        return true;
 
-        // Get recent messages for context
-        const recentMessages = await runtime.messageManager.getMemories({
-            roomId: message.roomId,
-            count: 4
-        });
+        // // Get recent messages for context
+        // const recentMessages = await runtime.messageManager.getMemories({
+        //     roomId: message.roomId,
+        //     count: 4
+        // });
 
-        // Create context for AI analysis
-        const context = {
-            recentMessages: recentMessages.map(m => m.content.text).join('\n'),
-            currentMessage: message.content.text,
-            currentState: state
-        };
+        // // Create context for AI analysis
+        // const context = {
+        //     recentMessages: recentMessages.map(m => m.content.text).join('\n'),
+        //     currentMessage: message.content.text,
+        //     currentState: state
+        // };
 
-        // Use AI to analyze the intent and state
-        const analysis = await generateText({
-            runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to send a message to a group or is a confirmation of sending.
-            Recent messages: ${context.recentMessages}
-            Current message: ${context.currentMessage}
+        // // Use AI to analyze the intent and state
+        // const analysis = await generateText({
+        //     runtime,
+        //     context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to send a message to a group or is a confirmation of sending.
+        //     Recent messages: ${context.recentMessages}
+        //     Current message: ${context.currentMessage}
             
-            Return ONLY a JSON object with the following structure, no other text:
-            {
-                "hasIntent": boolean,
-                "isConfirmation": boolean,
-                "currentStage": string,
-                "confidence": number
-            }`,
-            modelClass: ModelClass.SMALL
-        });
+        //     Return ONLY a JSON object with the following structure, no other text:
+        //     {
+        //         "hasIntent": boolean,
+        //         "isConfirmation": boolean,
+        //         "currentStage": string,
+        //         "confidence": number
+        //     }`,
+        //     modelClass: ModelClass.SMALL
+        // });
 
-        console.log('Analysis response:', analysis);
+        // console.log('Analysis response:', analysis);
 
-        const result = extractJsonFromResponse(analysis);
-        if (!result) {
-            console.error('Failed to extract valid JSON from analysis');
-            return false;
-        }
+        // const result = extractJsonFromResponse(analysis);
+        // if (!result) {
+        //     console.error('Failed to extract valid JSON from analysis');
+        //     return false;
+        // }
 
-        return result.hasIntent || result.isConfirmation;
+        // return result.hasIntent || result.isConfirmation;
     },
     suppressInitialMessage: true,
     handler: async (

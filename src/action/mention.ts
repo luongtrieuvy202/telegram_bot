@@ -67,59 +67,60 @@ export const mentionAction: Action = {
         }
 
 
-        console.log('[MENTION] Fetching recent messages for context');
-        const recentMessages = await runtime.messageManager.getMemories({
-            roomId: message.roomId,
-            count: 5
-        });
+        // console.log('[MENTION] Fetching recent messages for context');
+        // const recentMessages = await runtime.messageManager.getMemories({
+        //     roomId: message.roomId,
+        //     count: 5
+        // });
 
-        console.log('[MENTION] Creating context for AI analysis');
-        const context = {
-            recentMessages: recentMessages.map(m => m.content.text).join('\n'),
-            currentMessage: message.content.text,
-            currentState: state
-        };
+        // console.log('[MENTION] Creating context for AI analysis');
+        // const context = {
+        //     recentMessages: recentMessages.map(m => m.content.text).join('\n'),
+        //     currentMessage: message.content.text,
+        //     currentState: state
+        // };
 
-        console.log('[MENTION] Analyzing intent with AI');
-        const analysis = await generateText({
-            runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to find mentions in groups.
-            IMPORTANT: This is ONLY for finding mentions, NOT for summarizing, sending messages, or finding unanswered questions.
+        // console.log('[MENTION] Analyzing intent with AI');
+        // const analysis = await generateText({
+        //     runtime,
+        //     context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to find mentions in groups.
+        //     IMPORTANT: This is ONLY for finding mentions, NOT for summarizing, sending messages, or finding unanswered questions.
             
-            Recent messages: ${context.recentMessages}
-            Current message: ${context.currentMessage}
+        //     Recent messages: ${context.recentMessages}
+        //     Current message: ${context.currentMessage}
             
-            Return ONLY a JSON object with the following structure, no other text:
-            {
-                "hasIntent": boolean, // true ONLY if user wants to find mentions
-                "targetGroup": string, // name of the group to check (if specified)
-                "isAllGroups": boolean, // true if user wants to check all groups
-                "confidence": number, // confidence score of the analysis
-                "nextAction": string, // what the bot should do next
-                "isSummaryRequest": boolean, // true if this is actually a request to summarize
-                "isSendRequest": boolean, // true if this is actually a request to send a message
-                "isQuestionRequest": boolean // true if this is actually a request to find unanswered questions
-            }`,
-            modelClass: ModelClass.SMALL
-        });
+        //     Return ONLY a JSON object with the following structure, no other text:
+        //     {
+        //         "hasIntent": boolean, // true ONLY if user wants to find mentions
+        //         "targetGroup": string, // name of the group to check (if specified)
+        //         "isAllGroups": boolean, // true if user wants to check all groups
+        //         "confidence": number, // confidence score of the analysis
+        //         "nextAction": string, // what the bot should do next
+        //         "isSummaryRequest": boolean, // true if this is actually a request to summarize
+        //         "isSendRequest": boolean, // true if this is actually a request to send a message
+        //         "isQuestionRequest": boolean // true if this is actually a request to find unanswered questions
+        //     }`,
+        //     modelClass: ModelClass.SMALL
+        // });
 
-        console.log('[MENTION] AI Analysis response:', analysis);
+        // console.log('[MENTION] AI Analysis response:', analysis);
 
-        const result = extractJsonFromResponse(analysis);
-        if (!result) {
-            console.error('[MENTION] Failed to extract valid JSON from analysis');
-            return false;
-        }
+        // const result = extractJsonFromResponse(analysis);
+        // if (!result) {
+        //     console.error('[MENTION] Failed to extract valid JSON from analysis');
+        //     return false;
+        // }
 
-        console.log('[MENTION] Analysis result:', JSON.stringify(result, null, 2));
+        // console.log('[MENTION] Analysis result:', JSON.stringify(result, null, 2));
 
-        if (result.isSummaryRequest || result.isSendRequest || result.isQuestionRequest) {
-            console.log('[MENTION] Request type mismatch - rejecting');
-            return false;
-        }
+        // if (result.isSummaryRequest || result.isSendRequest || result.isQuestionRequest) {
+        //     console.log('[MENTION] Request type mismatch - rejecting');
+        //     return false;
+        // }
 
-        console.log('[MENTION] Validation successful:', result.hasIntent);
-        return result.hasIntent;
+        // console.log('[MENTION] Validation successful:', result.hasIntent);
+        // return result.hasIntent;
+        return true;
     },
     suppressInitialMessage: true,
     handler: async (

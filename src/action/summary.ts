@@ -21,65 +21,68 @@ export const summaryAction: Action = {
     similes: ['summary', 'summarize', 'group'],
     description: "Summarize messages from a specific group",
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
+
         console.log('[SUMMARY] Starting validation check');
         if (!state?.handle) {
             console.log('[SUMMARY] Validation failed: No state handle found');
             return false;
         }
+        return true;
 
-        console.log('[SUMMARY] Fetching recent messages for context');
-        const recentMessages = await runtime.messageManager.getMemories({
-            roomId: message.roomId,
-            count: 2
-        });
 
-        console.log('[SUMMARY] Creating context for AI analysis');
-        const context = {
-            recentMessages: recentMessages.map(m => m.content.text).join('\n'),
-            currentMessage: message.content.text,
-            currentState: state
-        };
+        // console.log('[SUMMARY] Fetching recent messages for context');
+        // const recentMessages = await runtime.messageManager.getMemories({
+        //     roomId: message.roomId,
+        //     count: 2
+        // });
 
-        console.log('[SUMMARY] Analyzing intent with AI');
-        const analysis = await generateText({
-            runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to summarize group messages.
-            IMPORTANT: This is ONLY for summarizing messages, NOT for finding mentions, sending messages, or finding unanswered questions.
+        // console.log('[SUMMARY] Creating context for AI analysis');
+        // const context = {
+        //     recentMessages: recentMessages.map(m => m.content.text).join('\n'),
+        //     currentMessage: message.content.text,
+        //     currentState: state
+        // };
+
+        // console.log('[SUMMARY] Analyzing intent with AI');
+        // const analysis = await generateText({
+        //     runtime,
+        //     context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to summarize group messages.
+        //     IMPORTANT: This is ONLY for summarizing messages, NOT for finding mentions, sending messages, or finding unanswered questions.
             
-            Recent messages: ${context.recentMessages}
-            Current message: ${context.currentMessage}
+        //     Recent messages: ${context.recentMessages}
+        //     Current message: ${context.currentMessage}
             
-            Return ONLY a JSON object with the following structure, no other text:
-            {
-                "hasIntent": boolean, // true ONLY if user wants to summarize messages
-                "targetGroup": string, // name of the group to summarize (if specified)
-                "isAllGroups": boolean, // true if user wants to summarize all groups
-                "confidence": number, // confidence score of the analysis
-                "nextAction": string, // what the bot should do next
-                "isMentionRequest": boolean, // true if this is actually a request to find mentions
-                "isSendRequest": boolean, // true if this is actually a request to send a message
-                "isQuestionRequest": boolean // true if this is actually a request to find unanswered questions
-            }`,
-            modelClass: ModelClass.SMALL
-        });
+        //     Return ONLY a JSON object with the following structure, no other text:
+        //     {
+        //         "hasIntent": boolean, // true ONLY if user wants to summarize messages
+        //         "targetGroup": string, // name of the group to summarize (if specified)
+        //         "isAllGroups": boolean, // true if user wants to summarize all groups
+        //         "confidence": number, // confidence score of the analysis
+        //         "nextAction": string, // what the bot should do next
+        //         "isMentionRequest": boolean, // true if this is actually a request to find mentions
+        //         "isSendRequest": boolean, // true if this is actually a request to send a message
+        //         "isQuestionRequest": boolean // true if this is actually a request to find unanswered questions
+        //     }`,
+        //     modelClass: ModelClass.SMALL
+        // });
 
-        console.log('[SUMMARY] AI Analysis response:', analysis);
+        // console.log('[SUMMARY] AI Analysis response:', analysis);
 
-        const result = extractJsonFromResponse(analysis);
-        if (!result) {
-            console.error('[SUMMARY] Failed to extract valid JSON from analysis');
-            return false;
-        }
+        // const result = extractJsonFromResponse(analysis);
+        // if (!result) {
+        //     console.error('[SUMMARY] Failed to extract valid JSON from analysis');
+        //     return false;
+        // }
 
-        console.log('[SUMMARY] Analysis result:', JSON.stringify(result, null, 2));
+        // console.log('[SUMMARY] Analysis result:', JSON.stringify(result, null, 2));
 
-        if (result.isMentionRequest || result.isSendRequest || result.isQuestionRequest) {
-            console.log('[SUMMARY] Request type mismatch - rejecting');
-            return false;
-        }
+        // if (result.isMentionRequest || result.isSendRequest || result.isQuestionRequest) {
+        //     console.log('[SUMMARY] Request type mismatch - rejecting');
+        //     return false;
+        // }
 
-        console.log('[SUMMARY] Validation successful:', result.hasIntent);
-        return result.hasIntent;
+        // console.log('[SUMMARY] Validation successful:', result.hasIntent);
+        // return result.hasIntent;
     },
     suppressInitialMessage: true,
     handler: async (

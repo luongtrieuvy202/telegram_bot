@@ -192,8 +192,9 @@ export const memberReportAction: Action = {
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
         if (!state.handle) return false
 
-        const isMemberReport = await detectMemberReportIntent(runtime, message);
-        return isMemberReport;
+        // const isMemberReport = await detectMemberReportIntent(runtime, message);
+        // return isMemberReport;
+        return true;
     },
     suppressInitialMessage: true,
     handler: async (

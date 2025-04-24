@@ -1415,7 +1415,7 @@ export class MessageManager {
 
             // Create content
             const content: Content = {
-                text: fullText,
+                text: fullText || "",  // Ensure text is never undefined
                 source: "telegram",
                 inReplyTo:
                     "reply_to_message" in message && message.reply_to_message
@@ -1439,6 +1439,11 @@ export class MessageManager {
                 createdAt: message.date * 1000,
                 embedding: getEmbeddingZeroVector(),
             };
+
+            // Ensure content has required properties
+            if (!memory.content.text) {
+                memory.content.text = "";
+            }
 
             // Create memory
             await this.runtime.messageManager.createMemory(memory);
@@ -1521,21 +1526,21 @@ export class MessageManager {
                 }
 
                 // If no action was handled, fall back to checking all actions
-                if (!handled) {
-                    const actionNames = ["SUMMARY", "MENTION_AUTO", "MENTION", "GROUP_RULES", 
-                                      "MEMBER_REPORT", "POLL", "SEND_TO_GROUP", "UNANSWERED_QUESTIONS"];
+                // if (!handled) {
+                //     const actionNames = ["SUMMARY", "MENTION_AUTO", "MENTION", "GROUP_RULES", 
+                //                       "MEMBER_REPORT", "POLL", "SEND_TO_GROUP", "UNANSWERED_QUESTIONS"];
                     
-                    for (let action of this.runtime.actions.filter(a => actionNames.includes(a.name))) {
-                        if (!action) continue;
-                        state.handle = true;
-                        const shouldHandle = await action.validate(this.runtime, memory, state);
-                        if (shouldHandle) {
-                            await action.handler(this.runtime, memory, state, { ctx }, callback);
-                            handled = true;
-                            break;
-                        }
-                    }
-                }
+                //     for (let action of this.runtime.actions.filter(a => actionNames.includes(a.name))) {
+                //         if (!action) continue;
+                //         state.handle = true;
+                //         const shouldHandle = await action.validate(this.runtime, memory, state);
+                //         if (shouldHandle) {
+                //             await action.handler(this.runtime, memory, state, { ctx }, callback);
+                //             handled = true;
+                //             break;
+                //         }
+                //     }
+                // }
 
                 // If still no action handled, use default action
                 if (!handled) {

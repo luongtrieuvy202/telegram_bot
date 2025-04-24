@@ -124,61 +124,62 @@ export const pollAction: Action = {
         }
 
 
-        console.log('[POLL] Fetching recent messages for context');
-        const recentMessages = await runtime.messageManager.getMemories({
-            roomId: message.roomId,
-            count: 5
-        });
+        // console.log('[POLL] Fetching recent messages for context');
+        // const recentMessages = await runtime.messageManager.getMemories({
+        //     roomId: message.roomId,
+        //     count: 5
+        // });
 
-        console.log('[POLL] Recent messages:', recentMessages);
+        // console.log('[POLL] Recent messages:', recentMessages);
 
-        console.log('[POLL] Creating context for AI analysis');
-        const context = {
-            recentMessages: recentMessages.map(m => m.content.text).join('\n'),
-            currentMessage: message.content.text,
-            currentState: state
-        };
+        // console.log('[POLL] Creating context for AI analysis');
+        // const context = {
+        //     recentMessages: recentMessages.map(m => m.content.text).join('\n'),
+        //     currentMessage: message.content.text,
+        //     currentState: state
+        // };
 
-        console.log('[POLL] Analyzing intent with AI');
-        const analysis = await generateText({
-            runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to manage polls.
-            IMPORTANT: This is ONLY for poll management, NOT for summarizing, sending messages, or finding mentions.
+        // console.log('[POLL] Analyzing intent with AI');
+        // const analysis = await generateText({
+        //     runtime,
+        //     context: `You are a JSON-only response bot. Your task is to analyze if a message indicates an intent to manage polls.
+        //     IMPORTANT: This is ONLY for poll management, NOT for summarizing, sending messages, or finding mentions.
             
-            Recent messages: ${context.recentMessages}
-            Current message: ${context.currentMessage}
+        //     Recent messages: ${context.recentMessages}
+        //     Current message: ${context.currentMessage}
             
-            Return ONLY a JSON object with the following structure, no other text:
-            {
-                "hasIntent": boolean, // true ONLY if user wants to manage polls
-                "pollType": string, // "create", "results", "close", "list", or null
-                "confidence": number, // confidence score of the analysis
-                "groupName": string, // name of the group if specified
-                "pollDetails": { // only if pollType is "create"
-                    "question": string,
-                    "options": string[]
-                }
-            }`,
-            modelClass: ModelClass.SMALL
-        });
+        //     Return ONLY a JSON object with the following structure, no other text:
+        //     {
+        //         "hasIntent": boolean, // true ONLY if user wants to manage polls
+        //         "pollType": string, // "create", "results", "close", "list", or null
+        //         "confidence": number, // confidence score of the analysis
+        //         "groupName": string, // name of the group if specified
+        //         "pollDetails": { // only if pollType is "create"
+        //             "question": string,
+        //             "options": string[]
+        //         }
+        //     }`,
+        //     modelClass: ModelClass.SMALL
+        // });
 
-        console.log('[POLL] AI Analysis response:', analysis);
+        // console.log('[POLL] AI Analysis response:', analysis);
 
-        const result = extractJsonFromResponse(analysis);
-        if (!result) {
-            console.error('[POLL] Failed to extract valid JSON from analysis');
-            return false;
-        }
+        // const result = extractJsonFromResponse(analysis);
+        // if (!result) {
+        //     console.error('[POLL] Failed to extract valid JSON from analysis');
+        //     return false;
+        // }
 
-        console.log('[POLL] Analysis result:', JSON.stringify(result, null, 2));
+        // console.log('[POLL] Analysis result:', JSON.stringify(result, null, 2));
 
-        if (!result.hasIntent || result.confidence < 0.7) {
-            console.log('[POLL] Low confidence or no intent found');
-            return false;
-        }
+        // if (!result.hasIntent || result.confidence < 0.7) {
+        //     console.log('[POLL] Low confidence or no intent found');
+        //     return false;
+        // }
 
-        console.log('[POLL] Validation successful:', result.hasIntent);
-        return result.hasIntent;
+        // console.log('[POLL] Validation successful:', result.hasIntent);
+        // return result.hasIntent;
+        return true;
     },
     suppressInitialMessage: true,
     handler: async (
