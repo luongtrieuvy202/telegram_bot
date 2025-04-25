@@ -3,6 +3,26 @@ import {Context, NarrowedContext, Telegraf, Markup} from "telegraf";
 import {mention} from "telegraf/format";
 import {Message, Update} from "telegraf/types";
 
+// Helper function to extract JSON from AI response
+export function extractJsonFromResponse(response: string): any {
+    try {
+        // First try direct parse
+        return JSON.parse(response);
+    } catch (error) {
+        // If direct parse fails, try to extract JSON from the response
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            try {
+                return JSON.parse(jsonMatch[0]);
+            } catch (e) {
+                console.error('Failed to parse extracted JSON:', e);
+                return null;
+            }
+        }
+        return null;
+    }
+}
+
 export async function getUserGroupMessages(userId) {
     try {
         const [groupIds, groupInfos]: [string[], Record<string, string>[]] = await getGroupsByUserId(userId)

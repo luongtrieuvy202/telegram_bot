@@ -2,6 +2,7 @@ import {Action, IAgentRuntime, Memory, State, HandlerCallback, generateText, Mod
 import redis from "../redis/redis.ts";
 import {Context} from "telegraf";
 import {Update} from "telegraf/types";
+import {getGroupsByUserId} from "./utils.ts";
 
 // Redis key patterns:
 // group:{groupId}:new_members:{timestamp} -> hash containing member info
@@ -18,6 +19,7 @@ interface MemberInfo {
 export async function trackNewMember(groupId: string, member: MemberInfo) {
     const now = Date.now();
     const memberKey = `group:${groupId}:new_members:${now}`;
+    console.log(memberKey)
     const memberSetKey = `group:${groupId}:members`;
 
     await redis.multi()
@@ -31,24 +33,36 @@ export async function trackNewMember(groupId: string, member: MemberInfo) {
 
 async function getMemberReport(groupId: string, startTime: number, endTime: number = Date.now()): Promise<MemberInfo[]> {
     const memberSetKey = `group:${groupId}:members`;
-    const members = await redis.zrangebyscore(memberSetKey, startTime, endTime);
+    
+    // Get all member IDs
+    const members = await redis.zrange(memberSetKey, 0, -1);
+    console.log('Found all members:', members);
+    
+    if (members.length === 0) {
+        return [];
+    }
 
-    const pipeline = redis.pipeline();
-    for (const memberId of members) {
-        const memberKeys = await redis.keys(`group:${groupId}:new_members:*`);
-        for (const key of memberKeys) {
-            pipeline.hgetall(key);
+    // Get all member keys
+    const memberKeys = await redis.keys(`group:${groupId}:new_members:*`);
+    console.log('Found member keys:', memberKeys);
+    
+    // Get member data for each key
+    const memberData: MemberInfo[] = [];
+    for (const key of memberKeys) {
+        const data = await redis.hgetall(key);
+        if (data && data.id && members.includes(data.id)) {
+            memberData.push({
+                id: data.id,
+                username: data.username || '',
+                firstName: data.firstName,
+                lastName: data.lastName,
+                joinedAt: parseInt(data.joinedAt)
+            });
         }
     }
 
-    const results = await pipeline.exec();
-    return results
-        .map(([err, data]) => data as MemberInfo)
-        .filter((data): data is MemberInfo => {
-            if (!data) return false;
-            const joinedAt = parseInt(data.joinedAt as unknown as string);
-            return !isNaN(joinedAt) && joinedAt >= startTime && joinedAt <= endTime;
-        });
+    // Sort by join time
+    return memberData.sort((a, b) => b.joinedAt - a.joinedAt);
 }
 
 function formatTimeAgo(timestamp: number): string {
@@ -63,22 +77,56 @@ function formatTimeAgo(timestamp: number): string {
     return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
 }
 
-async function detectMemberReportIntent(runtime: IAgentRuntime, message: Memory): Promise<boolean> {
-    const intentPrompt = `You are a helpful Telegram group assistant. Your task is to understand if the user wants information about new group members.
-
-Analyze the following message and determine if the user is asking about new members. Consider:
-- Direct questions about new members
-- Questions about recent joiners
-- Requests for member information
-- Time-based queries (today, this week, this month)
+async function extractReportIntent(runtime: IAgentRuntime, message: Memory): Promise<{
+    targetGroup?: string;
+    period: string;
+    startTime: number;
+}> {
+    const intentPrompt = `You are a JSON-only response bot. Your task is to analyze a message and determine the user's intent for member reporting.
 
 Message: "${message.content.text}"
 
-Respond with one of these exact phrases:
-- "YES" if the user is asking about new members
-- "NO" if they are not
+Consider these scenarios:
+1. Specific group report:
+   - "Show new members in [group name]"
+   - "Who joined [group name] recently?"
+   - "Member report for [group name]"
 
-Only respond with YES or NO.`;
+2. All groups report:
+   - "Show new members in all groups"
+   - "Who joined recently?"
+   - "Member report for all groups"
+   - "Is there any new member?"
+   - "Did anyone join today?"
+   - "Any new members this week?"
+
+3. Time period:
+   - "today" or "recently" -> last 24 hours
+   - "this week" -> last 7 days
+   - "this month" -> last 30 days
+   - no specific time mentioned -> last 24 hours
+
+Return ONLY a JSON object with this exact structure:
+{
+    "targetGroup": string | null,
+    "period": "day" | "week" | "month",
+    "startTime": number
+}
+
+Example responses:
+{
+    "targetGroup": "My Group",
+    "period": "day",
+    "startTime": 1745484575018
+}
+
+{
+    "targetGroup": null,
+    "period": "week",
+    "startTime": 1745484575018
+}
+
+Do not include any other text or explanation. Only return the JSON object.`;
 
     const response = await generateText({
         runtime,
@@ -86,59 +134,42 @@ Only respond with YES or NO.`;
         modelClass: ModelClass.SMALL
     });
 
-    return response.trim().toUpperCase() === "YES";
-}
+    console.log('Intent analysis response:', response);
 
-async function extractTimePeriod(runtime: IAgentRuntime, message: Memory): Promise<{
-    startTime: number,
-    period: string
-}> {
-    const timePrompt = `Analyze the following message and determine the time period the user is interested in for new members.
+    try {
+        // Clean the response to ensure it's valid JSON
+        const cleanedResponse = response.trim().replace(/^[^{]*/, '').replace(/[^}]*$/, '');
+        const result = JSON.parse(cleanedResponse);
+        
+        const now = Date.now();
+        const DAY = 24 * 60 * 60 * 1000;
+        const WEEK = 7 * DAY;
+        const MONTH = 30 * DAY;
 
-Message: "${message.content.text}"
-
-Consider these time periods:
-- "today" or "recently" -> last 24 hours
-- "this week" -> last 7 days
-- "this month" -> last 30 days
-- no specific time mentioned -> last 24 hours
-
-Respond with one of these exact phrases:
-- "DAY" for last 24 hours
-- "WEEK" for last 7 days
-- "MONTH" for last 30 days
-
-Only respond with DAY, WEEK, or MONTH.`;
-
-    const response = await generateText({
-        runtime,
-        context: timePrompt,
-        modelClass: ModelClass.SMALL
-    });
-
-    console.log(response)
-
-    const now = Date.now();
-    const DAY = 24 * 60 * 60 * 1000;
-    const WEEK = 7 * DAY;
-    const MONTH = 30 * DAY;
-
-    switch (response.trim().toUpperCase()) {
-        case "WEEK":
-            return {startTime: now - WEEK, period: "week"};
-        case "MONTH":
-            return {startTime: now - MONTH, period: "month"};
-        default:
-            return {startTime: now - DAY, period: "day"};
+        // Ensure we have valid values
+        return {
+            targetGroup: result.targetGroup || null,
+            period: result.period || 'day',
+            startTime: result.startTime || (now - DAY)
+        };
+    } catch (error) {
+        console.error('Failed to parse intent analysis:', error);
+        // Return default values if parsing fails
+        return {
+            targetGroup: null,
+            period: 'day',
+            startTime: Date.now() - (24 * 60 * 60 * 1000)
+        };
     }
 }
 
 function generateMemberReportResponse(
     members: MemberInfo[],
-    period: string
+    period: string,
+    groupName?: string
 ): string {
     if (members.length === 0) {
-        return `I don't see any new members who joined during this ${period}.`;
+        return `I don't see any new members who joined ${groupName ? `in ${groupName} ` : ''}during this ${period}.`;
     }
 
     // Group members by time periods for better readability
@@ -146,13 +177,20 @@ function generateMemberReportResponse(
     const HOUR = 60 * 60 * 1000;
     const DAY = 24 * HOUR;
 
-    const recentMembers = members.filter(m => now - m.joinedAt < HOUR);
-    const todayMembers = members.filter(m => now - m.joinedAt < DAY);
-    const olderMembers = members.filter(m => now - m.joinedAt >= DAY);
+    // Remove duplicates based on member ID
+    const uniqueMembers = Array.from(new Map(members.map(m => [m.id, m])).values());
+
+    // Sort by join time (most recent first)
+    const sortedMembers = uniqueMembers.sort((a, b) => b.joinedAt - a.joinedAt);
+
+    // Group members by time period
+    const recentMembers = sortedMembers.filter(m => now - m.joinedAt < HOUR);
+    const todayMembers = sortedMembers.filter(m => now - m.joinedAt >= HOUR && now - m.joinedAt < DAY);
+    const olderMembers = sortedMembers.filter(m => now - m.joinedAt >= DAY);
 
     const formatMemberList = (memberList: MemberInfo[]) => {
         return memberList
-            .map(m => `@${m.username || m.firstName} (joined ${formatTimeAgo(m.joinedAt)})`)
+            .map(m => `• @${m.username || m.firstName} (joined ${formatTimeAgo(m.joinedAt)})`)
             .join("\n");
     };
 
@@ -163,24 +201,24 @@ function generateMemberReportResponse(
 
     // Add recent members if any
     if (recentMembers.length > 0) {
-        parts.push(`\nRecently joined (${recentMembers.length}):`);
+        parts.push(`\n🕒 Recently joined (${recentMembers.length}):`);
         parts.push(formatMemberList(recentMembers));
     }
 
     // Add today's members if any (excluding recent ones)
     if (todayMembers.length > 0) {
-        parts.push(`\nJoined today (${todayMembers.length}):`);
+        parts.push(`\n📅 Joined today (${todayMembers.length}):`);
         parts.push(formatMemberList(todayMembers));
     }
 
     // Add older members if any
     if (olderMembers.length > 0) {
-        parts.push(`\nJoined earlier (${olderMembers.length}):`);
+        parts.push(`\n📆 Joined earlier (${olderMembers.length}):`);
         parts.push(formatMemberList(olderMembers));
     }
 
     // Add total count
-    parts.push(`\nTotal new members: ${members.length}`);
+    parts.push(`\n📊 Total new members: ${uniqueMembers.length}`);
 
     return parts.join("\n");
 }
@@ -203,7 +241,7 @@ export const memberReportAction: Action = {
     ): Promise<void> => {
         try {
             const ctx = options.ctx as Context<Update>;
-            const groupId = ctx.chat.id.toString();
+            const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
 
             await runtime.messageManager.createMemory({
                 content: {
@@ -214,17 +252,66 @@ export const memberReportAction: Action = {
                 agentId: message.agentId
             });
 
-            const {startTime, period} = await extractTimePeriod(runtime, message);
-            console.log(startTime, period)
-            const members = await getMemberReport(groupId, startTime);
-            const reportText = generateMemberReportResponse(members, period);
+            const {targetGroup, period, startTime} = await extractReportIntent(runtime, message);
+            console.log('Report intent:', { targetGroup, period, startTime });
 
-            callback({
-                text: reportText,
+            if (targetGroup) {
+                // Specific group report
+                const targetGroupInfo = groupInfos.find(group =>
+                    group.title?.toLowerCase() === targetGroup.toLowerCase()
+                );
+
+                if (!targetGroupInfo) {
+                    await callback({
+                        text: `I couldn't find the group "${targetGroup}". Here are the groups you have access to:\n${groupInfos.map(g => g.title).join('\n')}`,
+                        action: "MEMBER_REPORT"
+                    });
+                    return;
+                }
+
+                const members = await getMemberReport(targetGroupInfo.id, startTime);
+                const reportText = generateMemberReportResponse(members, period, targetGroupInfo.title);
+                await callback({
+                    text: reportText,
+                    action: "MEMBER_REPORT"
+                });
+            } else {
+                // All groups report
+                const allReports: { group: string; members: MemberInfo[] }[] = [];
+                
+                for (const group of groupInfos) {
+                    const members = await getMemberReport(group.id, startTime);
+                    if (members.length > 0) {
+                        allReports.push({
+                            group: group.title,
+                            members
+                        });
+                    }
+                }
+
+                if (allReports.length === 0) {
+                    await callback({
+                        text: `I don't see any new members who joined any of your groups during this ${period}.`,
+                        action: "MEMBER_REPORT"
+                    });
+                    return;
+                }
+
+                const reportText = allReports.map(report => 
+                    `📌 *${report.group}*\n${generateMemberReportResponse(report.members, period)}`
+                ).join('\n\n');
+
+                await callback({
+                    text: `📋 *All Groups Member Report*\n\n${reportText}`,
+                    action: "MEMBER_REPORT"
+                });
+            }
+        } catch (error) {
+            console.error('Error in member report handler:', error);
+            await callback({
+                text: "Sorry, I encountered an error while generating the member report.",
                 action: "MEMBER_REPORT"
             });
-        } catch (error) {
-            console.error(error)
         }
     },
     examples: []

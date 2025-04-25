@@ -6,15 +6,14 @@ import {
     HandlerCallback,
     generateText,
     ModelClass,
-    Validator,
-    Handler,
+
     ActionExample
 } from "@elizaos/core";
 import {Context} from "telegraf";
 import {Update} from "telegraf/types";
 
 import redis from "../redis/redis.ts";
-import {getGroupsByUserId} from "./utils.ts";
+import {getGroupsByUserId, extractJsonFromResponse} from "./utils.ts";
 
 interface RuleCondition {
     type: 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'matches_regex' | 'length_greater' | 'length_less';
@@ -49,24 +48,7 @@ interface ValidationResult {
     };
 }
 
-interface Group {
-    id: string;
-    name: string;
-    type: string;
-}
 
-// Helper function to extract JSON from text response
-function extractJsonFromResponse(response: string): any {
-    try {
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            return JSON.parse(jsonMatch[0]);
-        }
-        return null;
-    } catch (error) {
-        return null;
-    }
-}
 
 async function handleRuleCreate(groupId: string, rule: GroupRule) {
     const ruleId = `rule:${Date.now()}`;

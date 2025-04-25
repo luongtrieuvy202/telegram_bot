@@ -120,13 +120,13 @@ async function startAgent(character: Character, directClient: DirectClient) {
 
         directClient.registerAgent(runtime);
 
-        const checkInterval = setInterval(async () => {
-            try {
-                await checkMentionTimeouts(await runtime.clients[0].bot);
-            } catch (error) {
-                elizaLogger.error('Error in mention timeout check:', error);
-            }
-        }, 30 * 1000);
+        // const checkInterval = setInterval(async () => {
+        //     try {
+        //         await checkMentionTimeouts(await runtime.clients[0].bot);
+        //     } catch (error) {
+        //         elizaLogger.error('Error in mention timeout check:', error);
+        //     }
+        // }, 30 * 1000);
 
         // report to console
         elizaLogger.debug(`Started ${character.name} as ${runtime.agentId}`);

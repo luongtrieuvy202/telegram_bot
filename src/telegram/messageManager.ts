@@ -1462,75 +1462,49 @@ export class MessageManager {
                     content,
                     message.message_id
                 );
-                if (sentMessages) {
-                    const memories: Memory[] = [];
-
-                    // Create memories for each sent message
-                    for (let i = 0; i < sentMessages.length; i++) {
-                        const sentMessage = sentMessages[i];
-                        const isLastMessage = i === sentMessages.length - 1;
-
-                        const memory: Memory = {
-                            id: stringToUuid(
-                                roomId + "-" + sentMessage.message_id.toString()
-                            ),
-                            agentId,
-                            userId: agentId,
-                            roomId,
-                            content: {
-                                ...content,
-                                text: sentMessage.text,
-                                inReplyTo: messageId,
-                            },
-                            createdAt: sentMessage.date * 1000,
-                            embedding: getEmbeddingZeroVector(),
-                        };
-
-                        // Set action to CONTINUE for all messages except the last one
-                        // For the last message, use the original action from the response content
-                        memory.content.action = !isLastMessage
-                            ? "CONTINUE"
-                            : content.action;
-
-                        await this.runtime.messageManager.createMemory(memory);
-                        memories.push(memory);
-                    }
-
-                    return memories;
-                }
+                const memories: Memory[] = [];
+                return memories;
             };
 
             if (shouldRespond) {
-                // First, analyze the message for potential actions
-                const analysis = await this._analyzeMessageForActions(memory, state);
-                
-                console.log(analysis)
+                // Start typing effect
+                await this._startTypingEffect(ctx);
 
-                let handled = false;
+                try {
+                    // First, analyze the message for potential actions
+                    const analysis = await this._analyzeMessageForActions(memory, state);
+                    
+                    console.log(analysis)
 
-                if (!analysis.needsFullValidation && analysis.potentialActions.length > 0) {
-                    // Try the identified actions first
-                    for (const actionName of analysis.potentialActions) {
-                        const action = this.runtime.actions.find(a => a.name === actionName);
-                        if (!action) continue;
+                    let handled = false;
 
-                        state.handle = true;
-                        const shouldHandle = await action.validate(this.runtime, memory, state);
-                        
-                        if (shouldHandle) {
-                            await action.handler(this.runtime, memory, state, { ctx }, callback);
-                            handled = true;
-                            break;
+                    if (!analysis.needsFullValidation && analysis.potentialActions.length > 0) {
+                        // Try the identified actions first
+                        for (const actionName of analysis.potentialActions) {
+                            const action = this.runtime.actions.find(a => a.name === actionName);
+                            if (!action) continue;
+
+                            state.handle = true;
+                            const shouldHandle = await action.validate(this.runtime, memory, state);
+                            
+                            if (shouldHandle) {
+                                await action.handler(this.runtime, memory, state, { ctx }, callback);
+                                handled = true;
+                                break;
+                            }
                         }
                     }
-                }
 
-                // If still no action handled, use default action
-                if (!handled) {
-                    const defaultAction = this.runtime.actions.find(a => a.name === "DEFAULT");
-                    if (defaultAction) {
-                        await defaultAction.handler(this.runtime, memory, state, { ctx }, callback);
+                    // If still no action handled, use default action
+                    if (!handled) {
+                        const defaultAction = this.runtime.actions.find(a => a.name === "DEFAULT");
+                        if (defaultAction) {
+                            await defaultAction.handler(this.runtime, memory, state, { ctx }, callback);
+                        }
                     }
+                } finally {
+                    // Stop typing effect
+                    await this._stopTypingEffect(ctx);
                 }
             }
 
@@ -1555,6 +1529,8 @@ export class MessageManager {
             count: 4
         });
 
+        console.log(recentMessages)
+
         const context = {
             recentMessages: recentMessages.map(m => m.content.text).join('\n'),
             currentMessage: message.content.text,
@@ -1564,6 +1540,8 @@ export class MessageManager {
                 similes: a.similes
             }))
         };
+
+        console.log(context)
 
         const analysis = await generateText({
             runtime: this.runtime,
@@ -1697,16 +1675,25 @@ export class MessageManager {
                  * Must have action type
             
             7. MEMBER_REPORT:
-               - Primary Keywords: "report", "activity", "members"
-               - Secondary Keywords: "stats", "analytics", "participation"
+               - Primary Keywords: "report", "activity", "members", "new", "joined", "join"
+               - Secondary Keywords: "stats", "analytics", "participation", "recent", "today", "week", "month"
                - Common Patterns:
                  * "Show member activity"
                  * "Generate participation report"
                  * "Check member stats"
+                 * "Is there any new member?"
+                 * "Did anyone join today?"
+                 * "Who joined recently?"
+                 * "Any new members this week?"
+                 * "Show me who joined"
+                 * "List new members"
+                 * "Check new joiners"
                - Context Indicators:
                  * Group-specific reports
                  * Time-based reports
                  * Member-specific reports
+                 * Question-based queries about new members
+                 * Inquiries about recent joiners
                - State Management:
                  * Tracks member activity
                  * Stores report history
@@ -1715,6 +1702,7 @@ export class MessageManager {
                  * Must have group context
                  * Must have time context
                  * Must have report type
+                 * Can be question-based queries
             
             8. DEFAULT:
                - Primary Keywords: None specific
@@ -1783,6 +1771,22 @@ export class MessageManager {
                 potentialActions: [],
                 needsFullValidation: true
             };
+        }
+    }
+
+    private async _startTypingEffect(ctx: Context): Promise<void> {
+        try {
+            await ctx.telegram.sendChatAction(ctx.chat.id, 'typing');
+        } catch (error) {
+            console.error('Failed to start typing effect:', error);
+        }
+    }
+
+    private async _stopTypingEffect(ctx: Context): Promise<void> {
+        try {
+            await ctx.telegram.sendChatAction(ctx.chat.id, 'typing');
+        } catch (error) {
+            console.error('Failed to stop typing effect:', error);
         }
     }
 }

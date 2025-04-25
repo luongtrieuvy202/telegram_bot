@@ -9,26 +9,7 @@ import {
 } from "@elizaos/core";
 import {Context} from "telegraf";
 import {Update} from "telegraf/types";
-
-// Helper function to extract JSON from AI response
-function extractJsonFromResponse(response: string): any {
-    try {
-        // First try direct parse
-        return JSON.parse(response);
-    } catch (error) {
-        // If direct parse fails, try to extract JSON from the response
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            try {
-                return JSON.parse(jsonMatch[0]);
-            } catch (e) {
-                console.error('Failed to parse extracted JSON:', e);
-                return null;
-            }
-        }
-        return null;
-    }
-}
+import {extractJsonFromResponse} from "./utils.ts";
 
 export const defaultAction: Action = {
     name: 'DEFAULT',

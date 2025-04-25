@@ -9,28 +9,9 @@ import {
 } from "@elizaos/core";
 import {Context} from "telegraf";
 import {Update} from "telegraf/types";
-import {getGroupsByUserId, getUserGroupMessages} from "./utils.ts";
+import {getGroupsByUserId, getUserGroupMessages, extractJsonFromResponse} from "./utils.ts";
 import redis from "../redis/redis.ts";
 
-// Helper function to extract JSON from AI response
-function extractJsonFromResponse(response: string): any {
-    try {
-        // First try direct parse
-        return JSON.parse(response);
-    } catch (error) {
-        // If direct parse fails, try to extract JSON from the response
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            try {
-                return JSON.parse(jsonMatch[0]);
-            } catch (e) {
-                console.error('Failed to parse extracted JSON:', e);
-                return null;
-            }
-        }
-        return null;
-    }
-}
 
 export const unansweredQuestionAction: Action = {
     name: 'UNANSWERED_QUESTIONS',
@@ -230,24 +211,5 @@ export const unansweredQuestionAction: Action = {
         }
         console.log('[UNANSWERED_QUESTIONS] Handler execution completed');
     },
-    examples: [
-        [
-            {
-                user: "user",
-                content: {
-                    text: "Show me unanswered questions in the Tech group",
-                    action: "UNANSWERED_QUESTION"
-                }
-            }
-        ],
-        [
-            {
-                user: "user",
-                content: {
-                    text: "What questions haven't been answered in all groups?",
-                    action: "UNANSWERED_QUESTION"
-                }
-            }
-        ]
-    ]
+    examples: [ ]
 } as Action; 

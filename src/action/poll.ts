@@ -193,10 +193,12 @@ export const pollAction: Action = {
                 );
 
                 if (!targetGroup) {
-                    await callback({
+                    const groupNotFoundResponse = {
                         text: `I couldn't find the group "${pollState.pollDetails.targetGroup}". Here are the groups you have access to:\n${groupInfos.map(g => g.title).join('\n')}`,
                         action: "POLL"
-                    });
+                    };
+                    await callback(groupNotFoundResponse);
+                    await createMemory(runtime, message, groupNotFoundResponse, true);
                     await clearPollState(runtime, message.roomId);
                     return;
                 }
@@ -210,10 +212,12 @@ export const pollAction: Action = {
                 await clearPollState(runtime, message.roomId);
                 return;
             } else {
-                await callback({
+                const cancelResponse = {
                     text: "Poll creation cancelled. Let me know if you'd like to try again.",
                     action: "POLL"
-                });
+                };
+                await callback(cancelResponse);
+                await createMemory(runtime, message, cancelResponse, true);
                 await clearPollState(runtime, message.roomId);
                 return;
             }
@@ -253,11 +257,12 @@ export const pollAction: Action = {
 
         const result = extractJsonFromResponse(analysis);
         if (!result) {
-            console.error('[POLL] Failed to extract valid JSON from handler analysis');
-            await callback({
+            const errorResponse = {
                 text: "I'm having trouble understanding your poll request. Could you please rephrase?",
                 action: "POLL"
-            });
+            };
+            await callback(errorResponse);
+            await createMemory(runtime, message, errorResponse, true);
             return;
         }
 
@@ -272,18 +277,22 @@ export const pollAction: Action = {
                 console.log('[POLL] Processing create intent for group:', result.targetGroup);
                 if (!targetGroup) {
                     console.log('[POLL] Target group not found:', result.targetGroup);
-                    await callback({
+                    const groupNotFoundResponse = {
                         text: `${result.response}`,
                         action: "POLL"
-                    });
+                    };
+                    await callback(groupNotFoundResponse);
+                    await createMemory(runtime, message, groupNotFoundResponse, true);
                     return;
                 }
 
                 if (!result.pollDetails?.question || !result.pollDetails?.options?.length) {
-                    await callback({
+                    const missingDetailsResponse = {
                         text: "Please provide both a question and options for the poll.",
                         action: "POLL"
-                    });
+                    };
+                    await callback(missingDetailsResponse);
+                    await createMemory(runtime, message, missingDetailsResponse, true);
                     return;
                 }
 
@@ -303,20 +312,24 @@ export const pollAction: Action = {
                     `Group: ${targetGroup.title}\n\n` +
                     `Please confirm by typing 'yes' or 'confirm' to create this poll, or 'no' to cancel.`;
 
-                await callback({
+                const confirmationResponse = {
                     text: confirmationMessage,
                     action: "POLL"
-                });
+                };
+                await callback(confirmationResponse);
+                await createMemory(runtime, message, confirmationResponse, true);
                 break;
 
             case 'results':
                 console.log('[POLL] Processing results intent for poll:', result.pollId);
                 if (!result.pollId) {
                     console.log('[POLL] No poll ID specified');
-                    await callback({
+                    const missingIdResponse = {
                         text: "Please specify which poll's results you want to see.",
                         action: "POLL"
-                    });
+                    };
+                    await callback(missingIdResponse);
+                    await createMemory(runtime, message, missingIdResponse, true);
                     return;
                 }
                 await handlePollResults(ctx, result.pollId);
@@ -326,10 +339,12 @@ export const pollAction: Action = {
                 console.log('[POLL] Processing close intent for poll:', result.pollId);
                 if (!result.pollId) {
                     console.log('[POLL] No poll ID specified');
-                    await callback({
+                    const missingIdResponse = {
                         text: "Please specify which poll you want to close.",
                         action: "POLL"
-                    });
+                    };
+                    await callback(missingIdResponse);
+                    await createMemory(runtime, message, missingIdResponse, true);
                     return;
                 }
                 await handlePollClose(ctx, result.pollId);
@@ -342,10 +357,12 @@ export const pollAction: Action = {
 
             default:
                 console.log('[POLL] Unknown intent:', result.pollType);
-                await callback({
+                const unknownIntentResponse = {
                     text: "I'm not sure what you'd like to do with the poll. Please specify create, results, close, or list.",
                     action: "POLL"
-                });
+                };
+                await callback(unknownIntentResponse);
+                await createMemory(runtime, message, unknownIntentResponse, true);
         }
         console.log('[POLL] Handler execution completed');
     },
@@ -353,73 +370,54 @@ export const pollAction: Action = {
 };
 
 async function handlePollCreate(ctx: Context<Update>, groupId: number, question: string, options: string[]) {
-    if (options.length < POLL_CONSTANTS.MIN_OPTIONS || options.length > POLL_CONSTANTS.MAX_OPTIONS) {
-        await ctx.reply(`Please provide between ${POLL_CONSTANTS.MIN_OPTIONS} and ${POLL_CONSTANTS.MAX_OPTIONS} options`);
-        return;
-    }
-
-    // Get user's groups using existing function
-    const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
-
-    // Get group info
-    const groupInfo = groupInfos.find(g => g.id === groupId.toString());
-    if (!groupInfo) {
-        await ctx.reply(`Group ID ${groupId} not found or you don't have access to it.`);
-        return;
-    }
-
-    // Initialize votes Map with all options set to 0
-    const votesMap = new Map<string, number>();
-    options.forEach(opt => votesMap.set(opt, 0));
-
-    const poll: Poll = {
-        id: `poll_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        question,
-        options,
-        creator: {
-            id: ctx.from.id,
-            username: ctx.from.username || 'unknown'
-        },
-        group: {
-            id: parseInt(groupInfo.id),
-            title: groupInfo.title
-        },
-        status: 'active',
-        responses: {
-            total: 0,
-            votes: votesMap
-        },
-        createdAt: Date.now()
-    };
-
-    await storePoll(poll);
-
-    // Send poll to the specified group
-    const message = formatPollMessage(poll);
-    const keyboard = options.map((opt, i) => [
-        {text: `${i + 1}. ${opt}`, callback_data: `poll_vote:${poll.id}:${opt}`}
-    ]);
-
     try {
-        // Send the poll to the group
-        await ctx.telegram.sendMessage(parseInt(groupInfo.id), message, {
-            reply_markup: {
-                inline_keyboard: keyboard
-            }
+        const poll = await ctx.telegram.sendPoll(groupId, question, options, {
+            is_anonymous: false,
+            allows_multiple_answers: false
         });
 
-        // Send private message to the creator with poll details
-        const privateMessage = `📊 Your poll has been created!\n\nQuestion: ${question}\nGroup: @${groupInfo.title}\nPoll ID: ${poll.id}\n`;
+        const chat = await ctx.telegram.getChat(groupId);
+        if (!('title' in chat)) {
+            throw new Error('Invalid chat type');
+        }
+
+        const pollId = poll.poll.id;
+
+        // Store poll in Redis
+        const newPoll: Poll = {
+            id: pollId,
+            question,
+            options,
+            creator: {
+                id: ctx.from.id,
+                username: ctx.from.username || ctx.from.first_name
+            },
+            group: {
+                id: groupId,
+                title: chat.title
+            },
+            status: 'active',
+            responses: {
+                total: 0,
+                votes: new Map()
+            },
+            createdAt: Date.now()
+        };
+
+        await storePoll(newPoll);
+
+        const privateMessage = `📊 Your poll has been created!\n\nQuestion: ${question}\nGroup: @${chat.title}\nPoll ID: ${pollId}\n`;
         await ctx.reply(privateMessage);
     } catch (error) {
-        await ctx.reply(`Failed to create poll in @${groupInfo.title}. Make sure the bot is a member of the group and has permission to send messages.`);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        await ctx.reply(`Failed to create poll. ${errorMessage}`);
     }
 }
 
 async function handlePollResults(ctx: Context<Update>, pollId: string) {
     const poll = await getPoll(pollId);
     if (!poll) {
-        await ctx.reply('Poll not found');
+        await ctx.reply('Poll not found. Please check the poll ID and try again.');
         return;
     }
 
@@ -429,12 +427,7 @@ async function handlePollResults(ctx: Context<Update>, pollId: string) {
 async function handlePollClose(ctx: Context<Update>, pollId: string) {
     const poll = await getPoll(pollId);
     if (!poll) {
-        await ctx.reply('Poll not found');
-        return;
-    }
-
-    if (poll.creator.id !== ctx.from.id) {
-        await ctx.reply('Only the poll creator can close the poll');
+        await ctx.reply('Poll not found. Please check the poll ID and try again.');
         return;
     }
 
@@ -491,44 +484,42 @@ async function getPoll(pollId: string): Promise<Poll | null> {
 }
 
 async function handlePollList(ctx: Context<Update>, groupName?: string) {
-    const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id);
-    let keys: string[] = [];
+    const polls = await redis.keys('poll:*');
+    const activePolls: Poll[] = [];
 
-    if (groupName) {
-        const groupInfo = groupInfos.find(g => g.title.toLowerCase() === groupName.replace('@', '').toLowerCase());
-        if (!groupInfo) {
-            await ctx.reply(`Group @${groupName} not found or you don't have access to it.`);
-            return;
-        }
-        keys = await redis.keys(`${POLL_CONSTANTS.GROUP_POLL_PREFIX}${groupInfo.id}:*`);
-    } else {
-        // Get all polls from user's groups
-        for (const groupId of groupIds) {
-            const groupKeys = await redis.keys(`${POLL_CONSTANTS.GROUP_POLL_PREFIX}${groupId}:*`);
-            keys.push(...groupKeys);
+    for (const key of polls) {
+        const poll = await getPoll(key.split(':')[1]);
+        if (poll && poll.status === 'active' && (!groupName || poll.group.title === groupName)) {
+            activePolls.push(poll);
         }
     }
 
-    const polls: Poll[] = [];
-
-    for (const key of keys) {
-        const data = await redis.get(key);
-        if (data) {
-            const poll = JSON.parse(data);
-            if (poll.status === 'active') {
-                polls.push(poll);
-            }
-        }
-    }
-
-    if (polls.length === 0) {
-        await ctx.reply('No active polls found.');
+    if (activePolls.length === 0) {
+        await ctx.reply(`No active polls found${groupName ? ` in @${groupName}` : ''}.`);
         return;
     }
 
-    const message = polls.map(poll =>
+    const pollsList = activePolls.map(poll =>
         `📊 ${poll.question}\nID: ${poll.id}\nGroup: @${poll.group.title}\nCreated by: @${poll.creator.username}\n`
     ).join('\n');
 
-    await ctx.reply(`Active Polls${groupName ? ` in @${groupName}` : ''}:\n\n${message}\n\nUse /poll results <ID> to view results`);
+    await ctx.reply(`Active Polls${groupName ? ` in @${groupName}` : ''}:\n\n${pollsList}\n\nUse /poll results <ID> to view results`);
+}
+
+// Add the createMemory function after the other helper functions
+async function createMemory(
+    runtime: IAgentRuntime,
+    message: Memory,
+    response: { text: string; action: string },
+    isBotMessage: boolean
+): Promise<void> {
+    const prefix = isBotMessage ? 'Tely: ' : 'User: ';
+    const prefixedText = `${prefix}${response.text}`;
+
+    await runtime.messageManager.createMemory({
+        content: { text: prefixedText },
+        roomId: message.roomId,
+        userId: message.userId,
+        agentId: message.agentId
+    });
 } 

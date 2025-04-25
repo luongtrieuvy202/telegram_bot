@@ -157,6 +157,7 @@ export class TelegramClient {
                             lastName: member.last_name,
                             joinedAt: Date.now()
                         });
+                        console.log(member)
                     }
                 }
             } catch (error) {

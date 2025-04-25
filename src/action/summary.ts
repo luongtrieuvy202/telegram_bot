@@ -10,10 +10,9 @@ import {
 
 
 import redis from "../redis/redis.ts";
-import {getUserGroupMessages, getGroupsByUserId} from "./utils.ts";
+import {getUserGroupMessages, getGroupsByUserId, extractJsonFromResponse} from "./utils.ts";
 import {Context} from "telegraf";
 import {Update} from "telegraf/types";
-import {message} from 'telegraf/filters';
 
 
 export const summaryAction: Action = {
@@ -269,111 +268,3 @@ export const summaryAction: Action = {
     },
     examples: []
 } as Action
-
-
-interface Message {
-    message_id: number;
-    from: string
-    text: string;
-    date: string;
-    username: string
-}
-
-interface GroupInfo {
-    id: string;
-    title: string;
-    type: string;
-    addedBy: string;
-    addedAt: string;
-}
-
-interface GroupData {
-    groupInfo: GroupInfo;
-    message: Message[];
-}
-
-function generateHumanSummary(
-    groups: Record<string, GroupData>,
-    userName: string
-): string {
-    let prompt = "🔍 *Unread Messages Summary*\n\n";
-    prompt += "**Role**: You're a helpful Telegram assistant summarizing unread messages.\n\n";
-    prompt += `
-  Act as a Telegram assistant that summarizes my unread messages from today. Follow these rules:
-  
-  1. **Scan** all unread group chats and prioritize:
-     - Direct mentions (@me)
-     - Unanswered questions (to me or the group)
-     - Deadlines or action items
-     - Urgent/time-sensitive updates
-  
-  2. **Summarize** each active group in 1-2 lines. Skip inactive/noisy groups unless I'm mentioned.
-  
-  3. **Flag priorities** clearly:
-     - Use "[Action: ...]" for tasks (e.g., "[Action: Reply about budget]")
-     - Use "[Deadline: ...]" for time-sensitive items
-     - List all priorities under "**Priority Items**" at the end
-  
-  
-  4. If nothing needs attention:
-     \`\`\`
-     No urgent items. Key updates: [Brief summary of notable discussions]
-     \`\`\`
-  
-  Keep tone natural and concise. Ignore spammy groups.Don't sound so robotic like. If we don't have any messages, just says we don't have any new messages today
-  `;
-
-    // Process each group
-    for (const [groupId, groupData] of Object.entries(groups)) {
-        prompt += `\n*Group: ${groupData.groupInfo.title}*\n`;
-
-        // Process each message
-        groupData.message.forEach((msg) => {
-            console.log(msg)
-            const sender = msg.username || 'Unknown';
-            const timeAgo = formatTimeAgo(msg.date);
-            const excerpt = msg.text.length > 50
-                ? `${msg.text.substring(0, 47)}...`
-                : msg.text;
-
-            prompt += `-${sender}: "${excerpt}"\n`;
-
-
-        });
-    }
-
-
-    return prompt;
-}
-
-
-
-function formatTimeAgo(dateString: string): string {
-    const now = new Date();
-    const msgDate = new Date(dateString);
-    const hours = Math.floor((now.getTime() - msgDate.getTime()) / (1000 * 60 * 60));
-
-    if (hours < 1) return 'just now';
-    if (hours < 24) return `${hours}h ago`;
-    return `${Math.floor(hours / 24)}d ago`;
-}
-
-// Helper function to extract JSON from AI response
-function extractJsonFromResponse(response: string): any {
-    try {
-        // First try direct parse
-        return JSON.parse(response);
-    } catch (error) {
-        // If direct parse fails, try to extract JSON from the response
-        const jsonMatch = response.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            try {
-                return JSON.parse(jsonMatch[0]);
-            } catch (e) {
-                console.error('Failed to parse extracted JSON:', e);
-                return null;
-            }
-        }
-        return null;
-    }
-}
