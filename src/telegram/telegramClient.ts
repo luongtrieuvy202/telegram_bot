@@ -9,6 +9,7 @@ import {handleMention, markMentionsAsRead, trackMention} from "../action/utils.t
 import {trackNewMember} from "../action/memberReport.ts";
 import {handlePollCallback} from "../action/poll.ts";
 import { checkTokenLimit, updateTokenUsage } from "../redis/tokenManager.ts";
+import { RateLimiter } from "./rateLimiter.ts";
 
 export class TelegramClient {
     private bot: Telegraf<Context>;
@@ -18,6 +19,7 @@ export class TelegramClient {
     private backendToken;
     private tgTrader;
     private options;
+    private rateLimiter: RateLimiter;
 
     constructor(runtime: IAgentRuntime, botToken: string) {
         elizaLogger.log("📱 Constructing new TelegramClient...");
@@ -32,6 +34,15 @@ export class TelegramClient {
         this.backend = runtime.getSetting("BACKEND_URL");
         this.backendToken = runtime.getSetting("BACKEND_TOKEN");
         this.tgTrader = runtime.getSetting("TG_TRADER"); // boolean To Be added to the settings
+        
+        // Initialize rate limiter with config from runtime settings
+        const rateLimitConfig = {
+            maxMessages: parseInt(runtime.getSetting("RATE_LIMIT_MAX_MESSAGES")?.toString() || "5"),
+            timeWindow: parseInt(runtime.getSetting("RATE_LIMIT_TIME_WINDOW")?.toString() || "60") * 1000, // Convert to milliseconds
+            cooldownPeriod: parseInt(runtime.getSetting("RATE_LIMIT_COOLDOWN")?.toString() || "5") * 60 * 1000 // Convert to milliseconds
+        };
+        this.rateLimiter = new RateLimiter(rateLimitConfig);
+        
         elizaLogger.log("✅ TelegramClient constructor completed");
     }
 
@@ -216,9 +227,26 @@ export class TelegramClient {
                     return;
                 }
 
+                const userId = ctx.from?.id.toString();
+                if (!userId) {
+                    elizaLogger.warn("Received message from a user without an ID.");
+                    return;
+                }
+
+                // Check rate limit for all messages
+                const isRateLimited = await this.rateLimiter.isRateLimited(userId);
+                if (isRateLimited) {
+                    const cooldownTime = await this.rateLimiter.getCooldownTime(userId);
+                    const minutes = Math.ceil(cooldownTime / 60000);
+                    await ctx.reply(`You've reached the message rate limit. Please wait ${minutes} minute(s) before sending more messages.`);
+                    return;
+                }
+
+                // Increment message count
+                await this.rateLimiter.incrementMessageCount(userId);
+
                 // Check token limit for private messages
                 if (ctx.message.chat.type === "private") {
-                    const userId = ctx.message.from.id.toString();
                     const hasTokens = await checkTokenLimit(userId);
                     
                     if (!hasTokens) {
@@ -272,15 +300,8 @@ export class TelegramClient {
 
 
                 if (this.tgTrader) {
-                    const userId = ctx.from?.id.toString();
                     const username =
                         ctx.from?.username || ctx.from?.first_name || "Unknown";
-                    if (!userId) {
-                        elizaLogger.warn(
-                            "Received message from a user without an ID."
-                        );
-                        return;
-                    }
                     try {
                         await getOrCreateRecommenderInBe(
                             userId,
