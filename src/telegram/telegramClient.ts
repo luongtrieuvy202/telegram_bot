@@ -8,6 +8,7 @@ import {Update} from "telegraf/types";
 import {handleMention, markMentionsAsRead, trackMention} from "../action/utils.ts";
 import {trackNewMember} from "../action/memberReport.ts";
 import {handlePollCallback} from "../action/poll.ts";
+import { checkTokenLimit, updateTokenUsage } from "../redis/tokenManager.ts";
 
 export class TelegramClient {
     private bot: Telegraf<Context>;
@@ -215,15 +216,22 @@ export class TelegramClient {
                     return;
                 }
 
+                // Check token limit for private messages
                 if (ctx.message.chat.type === "private") {
-                    try {
-                        const userId = ctx.message.from.id;
-                        const chatId = ctx.message.chat.id;
+                    const userId = ctx.message.from.id.toString();
+                    const hasTokens = await checkTokenLimit(userId);
+                    
+                    if (!hasTokens) {
+                        await ctx.reply("You have reached your token usage limit. Please try again later.");
+                        return;
+                    }
 
+                    try {
+                        const chatId = ctx.message.chat.id;
                         await redis.set(`user:${userId}:private_chat_id`, chatId.toString());
-                        console.log(`Saved private chat id ${chatId} for user ${userId}`)
+                        console.log(`Saved private chat id ${chatId} for user ${userId}`);
                     } catch (e) {
-                        console.error(e)
+                        console.error(e);
                     }
                 }
 
