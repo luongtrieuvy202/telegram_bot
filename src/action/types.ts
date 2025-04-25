@@ -5,7 +5,7 @@ import { Memory } from "@elizaos/core";
 interface SendToGroupState {
     stage: 'initial' | 'group_selection' | 'message_collection' | 'confirmation' | 'editing' | 'cancelled';
     messageDetails?: {
-        targetGroup: string;
+        targetGroup: string | 'all';  // 'all' for all groups
         messageContent: string;
         previousMessage?: string;
         previousGroup?: string;

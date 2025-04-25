@@ -71,6 +71,27 @@ async function sendMessageToGroup(
         .exec();
 }
 
+async function sendMessageToAllGroups(
+    bot: Telegraf,
+    ctx: Context<Update>,
+    groups: GroupInfo[],
+    messageContent: string
+): Promise<{ success: GroupInfo[]; failed: GroupInfo[] }> {
+    const results = { success: [] as GroupInfo[], failed: [] as GroupInfo[] };
+
+    for (const group of groups) {
+        try {
+            await sendMessageToGroup(bot, ctx, group, messageContent);
+            results.success.push(group);
+        } catch (error) {
+            console.error(`Failed to send message to ${group.title}:`, error);
+            results.failed.push(group);
+        }
+    }
+
+    return results;
+}
+
 function extractJsonFromResponse(response: string): any {
     try {
         // First try direct parse
@@ -210,21 +231,45 @@ export const sendToGroupAction: Action = {
         // Handle confirmation stage
         if (sendToGroupState?.stage === 'confirmation' && sendToGroupState.messageDetails) {
             if (isConfirmationMessage(message.content.text)) {
-                const targetGroup = typedGroupInfos.find(group =>
-                    group.title?.toLowerCase() === sendToGroupState.messageDetails.targetGroup?.toLowerCase()
-                );
+                if (sendToGroupState.messageDetails.targetGroup === 'all') {
+                    try {
+                        const results = await sendMessageToAllGroups(bot, ctx, typedGroupInfos, sendToGroupState.messageDetails.messageContent);
+                        
+                        let responseText = `Message sent successfully to ${results.success.length} group${results.success.length === 1 ? '' : 's'}!`;
+                        
+                        if (results.failed.length > 0) {
+                            responseText += `\n\nFailed to send to ${results.failed.length} group${results.failed.length === 1 ? '' : 's'}:`;
+                            results.failed.forEach(group => {
+                                responseText += `\n• ${group.title}`;
+                            });
+                        }
+                        
+                        const response = {
+                            text: responseText,
+                            action: "SEND_TO_GROUP"
+                        };
+                        await callback(response);
+                        await createMemory(runtime, message, response, true);
+                    } catch (error) {
+                        await handleError(runtime, message, callback, error);
+                    }
+                } else {
+                    const targetGroup = typedGroupInfos.find(group =>
+                        group.title?.toLowerCase() === sendToGroupState.messageDetails.targetGroup?.toLowerCase()
+                    );
 
-                if (!targetGroup) {
-                    await handleGroupNotFound(runtime, message, callback, sendToGroupState.messageDetails.targetGroup, typedGroupInfos);
-                    await clearSendToGroupState(runtime, message.roomId);
-                    return;
-                }
+                    if (!targetGroup) {
+                        await handleGroupNotFound(runtime, message, callback, sendToGroupState.messageDetails.targetGroup, typedGroupInfos);
+                        await clearSendToGroupState(runtime, message.roomId);
+                        return;
+                    }
 
-                try {
-                    await sendMessageToGroup(bot, ctx, targetGroup, sendToGroupState.messageDetails.messageContent);
-                    await handleSuccess(runtime, message, callback, targetGroup);
-                } catch (error) {
-                    await handleError(runtime, message, callback, error);
+                    try {
+                        await sendMessageToGroup(bot, ctx, targetGroup, sendToGroupState.messageDetails.messageContent);
+                        await handleSuccess(runtime, message, callback, targetGroup);
+                    } catch (error) {
+                        await handleError(runtime, message, callback, error);
+                    }
                 }
                 await clearSendToGroupState(runtime, message.roomId);
                 return;
@@ -281,7 +326,7 @@ export const sendToGroupAction: Action = {
             Return ONLY a JSON object with the following structure, no other text:
             {
                 "intent": string, // "send_message", "select_group", "provide_message", "edit_message", "change_group", "cancel"
-                "extractedGroup": string, // group name (not ID), must match one of the available groups
+                "extractedGroup": string, // group name (not ID), must match one of the available groups or "all" for all groups
                 "extractedMessage": string, // message content if provided
                 "isEdit": boolean, // true if user wants to edit the message
                 "isGroupChange": boolean, // true if user wants to change the group
@@ -312,6 +357,34 @@ export const sendToGroupAction: Action = {
 
         switch (result.intent) {
             case 'send_message':
+                if (result.extractedGroup?.toLowerCase() === 'all') {
+                    if (!result.extractedMessage) {
+                        const response = {
+                            text: result.response || "Please provide the message you want to send to all groups.",
+                            action: "SEND_TO_GROUP"
+                        };
+                        await callback(response);
+                        await createMemory(runtime, message, response, true);
+                        return;
+                    }
+
+                    await setSendToGroupState(runtime, message.roomId, {
+                        stage: 'confirmation',
+                        messageDetails: {
+                            targetGroup: 'all',
+                            messageContent: result.extractedMessage
+                        }
+                    });
+
+                    const allGroupsResponse = {
+                        text: `I'll send this message to all your groups:\n\n"${result.extractedMessage}"\n\nPlease confirm by typing 'yes' or 'confirm' to send this message, or 'no' to cancel.`,
+                        action: "SEND_TO_GROUP"
+                    };
+                    await callback(allGroupsResponse);
+                    await createMemory(runtime, message, allGroupsResponse, true);
+                    break;
+                }
+
                 if (!targetGroup) {
                     await handleGroupNotFound(runtime, message, callback, result.extractedGroup, typedGroupInfos);
                     return;
