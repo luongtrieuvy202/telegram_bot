@@ -191,17 +191,6 @@ export const sendToGroupAction: Action = {
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
         if (!state?.handle) return false;
 
-        const sendToGroupState = await getSendToGroupState(runtime, message.roomId);
-        
-        if (sendToGroupState?.stage === 'confirmation') {
-            return isConfirmationMessage(message.content.text) || 
-                   isCancellationMessage(message.content.text);
-        }
-
-        if (sendToGroupState?.stage === 'editing') {
-            return true;
-        }
-
         return true;
     },
     suppressInitialMessage: true,
@@ -227,6 +216,8 @@ export const sendToGroupAction: Action = {
             id: group.id,
             title: group.title
         }));
+
+        console.log(sendToGroupState);
 
         // Handle confirmation stage
         if (sendToGroupState?.stage === 'confirmation' && sendToGroupState.messageDetails) {
@@ -323,6 +314,8 @@ export const sendToGroupAction: Action = {
             Current message: ${message.content.text}
             Available groups: ${typedGroupInfos.map(g => g.title).join(', ')}
             
+            Important: If the user is sending a new message, ignore any previous message state and treat it as a fresh request.
+            
             Return ONLY a JSON object with the following structure, no other text:
             {
                 "intent": string, // "send_message", "select_group", "provide_message", "edit_message", "change_group", "cancel"
@@ -349,6 +342,11 @@ export const sendToGroupAction: Action = {
             await callback(response);
             await createMemory(runtime, message, response, true);
             return;
+        }
+
+        // Clear existing state if this is a new message
+        if (result.intent === 'send_message' || result.intent === 'select_group') {
+            await clearSendToGroupState(runtime, message.roomId);
         }
 
         const targetGroup = typedGroupInfos.find(group =>
