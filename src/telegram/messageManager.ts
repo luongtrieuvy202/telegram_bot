@@ -1470,6 +1470,9 @@ export class MessageManager {
                 // Start typing effect
                 await this._startTypingEffect(ctx);
 
+                // Send processing message
+                const processingMessageId = await this._sendProcessingMessage(ctx);
+
                 try {
                     // First, analyze the message for potential actions
                     const analysis = await this._analyzeMessageForActions(memory, state);
@@ -1505,6 +1508,8 @@ export class MessageManager {
                 } finally {
                     // Stop typing effect
                     await this._stopTypingEffect(ctx);
+                    // Delete processing message
+                    await this._deleteProcessingMessage(ctx, processingMessageId);
                 }
             }
 
@@ -1787,6 +1792,26 @@ export class MessageManager {
             await ctx.telegram.sendChatAction(ctx.chat.id, 'typing');
         } catch (error) {
             console.error('Failed to stop typing effect:', error);
+        }
+    }
+
+    private async _sendProcessingMessage(ctx: Context): Promise<number | null> {
+        try {
+            const message = await ctx.reply('⏳ Processing your request, please wait...');
+            return message.message_id;
+        } catch (error) {
+            console.error('Failed to send processing message:', error);
+            return null;
+        }
+    }
+
+    private async _deleteProcessingMessage(ctx: Context, messageId: number | null): Promise<void> {
+        if (messageId) {
+            try {
+                await ctx.telegram.deleteMessage(ctx.chat.id, messageId);
+            } catch (error) {
+                console.error('Failed to delete processing message:', error);
+            }
         }
     }
 }
