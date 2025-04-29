@@ -7,7 +7,7 @@ import {
     generateText,
     ModelClass,
 } from "@elizaos/core";
-import {Context} from "telegraf";
+import {Context, Markup} from "telegraf";
 import {Update} from "telegraf/types";
 import {extractJsonFromResponse} from "./utils.ts";
 
@@ -105,20 +105,23 @@ export const defaultAction: Action = {
 
         // Add feature suggestions if needed
         if (result.suggestFeatures) {
-            response += "\n\nI can help you with the following features:\n" +
-                "📝 *Summarize Messages* - Get a summary of group messages\n" +
-                "🔔 *Mentions* - Find messages where you were mentioned\n" +
-                "❓ *Unanswered Questions* - Find questions that haven't been answered\n" +
-                "📊 *Polls* - Create and manage polls in groups\n" +
-                "📢 *Send Messages* - Send messages to specific groups\n" +
-                "⚙️ *Group Rules* - Manage group rules and moderation\n\n" +
-                "Just ask me about any of these features to get started!";
+            ctx.reply(`${response}
+                \n✨Please add me to a group and I can help you with the following features (Click the button below):`, 
+                Markup.inlineKeyboard([
+                  [Markup.button.callback('📝 Summarize', 'help_summarize')],
+                  [Markup.button.callback('🔔 Mentions', 'help_mentions')],
+                  [Markup.button.callback('❓ Unanswered', 'help_unanswered')],
+                  [Markup.button.callback('📊 Polls', 'help_polls')],
+                  [Markup.button.callback('📢 Send Message', 'help_send')],
+                  [Markup.button.callback('👥 Member Reports', 'help_members')],
+                  [Markup.button.callback('⚙️ Group Rules', 'help_rules')],
+                ])
+              );
         }
-
-        await callback({
-            text: response,
-            action: "DEFAULT"
-        });
+        // await callback({
+        //     text: response,
+        //     action: "DEFAULT"
+        // });
         console.log('[DEFAULT] Handler execution completed');
     },
     examples: []

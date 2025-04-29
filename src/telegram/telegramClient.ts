@@ -177,6 +177,43 @@ export class TelegramClient {
             }
         });
 
+
+        // Handle button clicks
+        this.bot.action('help_summarize', (ctx) => {
+            ctx.answerCbQuery(); // remove loading spinner
+            ctx.replyWithMarkdown('📝 *Summarize Messages*\nGet a quick summary of group chats.\n_Example: "Give me a summary of the chat in support/all group."_');
+        });
+        
+        this.bot.action('help_mentions', (ctx) => {
+            ctx.answerCbQuery();
+            ctx.replyWithMarkdown('🔔 *Mentions*\nSee who mentioned you in any group.\n_Example: "Who mentioned me in the design/all group today?"_');
+        });
+        
+        this.bot.action('help_unanswered', (ctx) => {
+            ctx.answerCbQuery();
+            ctx.replyWithMarkdown('❓ *Unanswered Questions*\nFind out what questions haven’t been answered.\n_Example: "Find any unanswered questions from the /all group."_');
+        });
+        
+        this.bot.action('help_polls', (ctx) => {
+            ctx.answerCbQuery();
+            ctx.replyWithMarkdown('📊 *Polls*\nCreate and manage polls easily.\n_Example: "Create a poll in group A." (Include a question and 2–4 options!)_');
+        });
+        
+        this.bot.action('help_send', (ctx) => {
+            ctx.answerCbQuery();
+            ctx.replyWithMarkdown('📢 *Send Messages*\nSend messages to specific groups.\n_Example: "Can you send this message to the marketing/all group?"_');
+        });
+        
+        this.bot.action('help_members', (ctx) => {
+            ctx.answerCbQuery();
+            ctx.replyWithMarkdown('👥 *Member Reports*\nCheck for new members in any group.\n_Example: "Did anyone new join the project group recently?"_');
+        });
+  
+//   this.bot.action('help_rules', (ctx) => {
+//     ctx.answerCbQuery();
+//     ctx.replyWithMarkdown('⚙️ *Group Rules*\nManage and view group rules.\n_Example: "Show me the rules for the marketing group."_');
+//   });
+        
         this.bot.on('callback_query', handlePollCallback);
 
         this.bot.on("my_chat_member", async (ctx) => {
