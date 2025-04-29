@@ -233,22 +233,22 @@ export class TelegramClient {
                     return;
                 }
 
-                // Check rate limit for all messages
-                const isRateLimited = await this.rateLimiter.isRateLimited(userId);
-                if (isRateLimited) {
-                    const cooldownTime = await this.rateLimiter.getCooldownTime(userId);
-                    const minutes = Math.ceil(cooldownTime / 60000);
-                    await ctx.reply(`You've reached the message rate limit. Please wait ${minutes} minute(s) before sending more messages.`);
-                    return;
-                }
-
-                // Increment message count
-                await this.rateLimiter.incrementMessageCount(userId);
 
                 // Check token limit for private messages
                 if (ctx.message.chat.type === "private") {
                     const hasTokens = await checkTokenLimit(userId);
                     
+                    const isRateLimited = await this.rateLimiter.isRateLimited(userId);
+                    if (isRateLimited) {
+                        const cooldownTime = await this.rateLimiter.getCooldownTime(userId);
+                        const minutes = Math.ceil(cooldownTime / 60000);
+                        await ctx.reply(`You've reached the message rate limit. Please wait ${minutes} minute(s) before sending more messages.`);
+                        return;
+                    }
+    
+                    // Increment message count
+                    await this.rateLimiter.incrementMessageCount(userId);
+
                     if (!hasTokens) {
                         await ctx.reply("You have reached your token usage limit. Please try again later.");
                         return;
