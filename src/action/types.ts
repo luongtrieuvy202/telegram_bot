@@ -35,7 +35,7 @@ async function createMemory(
     const prefix = isBotMessage ? 'Tely: ' : 'User: ';
     const prefixedText = `${prefix}${response.text}`;
 
-    await runtime.messageManager.createMemory({
+    runtime.messageManager.createMemory({
         content: { text: prefixedText },
         roomId: message.roomId,
         userId: message.userId,

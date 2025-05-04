@@ -9,7 +9,7 @@ import {
 } from "@elizaos/core";
 import {Context, Markup} from "telegraf";
 import {Update} from "telegraf/types";
-import {extractJsonFromResponse} from "./utils.ts";
+import {extractJsonFromResponse, callOpenRouterText} from "./utils.ts";
 
 export const defaultAction: Action = {
     name: 'DEFAULT',
@@ -30,7 +30,7 @@ export const defaultAction: Action = {
         console.log('[DEFAULT] Starting handler execution');
         const ctx = options.ctx as Context<Update>;
 
-        await runtime.messageManager.createMemory({
+        runtime.messageManager.createMemory({
             content: {
                 text: message.content.text
             },
@@ -39,52 +39,75 @@ export const defaultAction: Action = {
             agentId: message.agentId
         });
 
-        console.log('[DEFAULT] Analyzing message for intent');
-        const analysis = await generateText({
-            runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze a message and determine how to respond in a conversational way while staying focused on your role as a group management assistant.
-            Message: ${message.content.text}
-            
-            Return ONLY a JSON object with the following structure, no other text:
-            {
-                "intent": string, // "greeting", "help", "confused", "farewell", "small_talk"
-                "response": string, // the exact message the bot should respond with
-                "suggestFeatures": boolean, // whether to suggest features after the response
-                "conversationType": string // "feature_focused" or "small_talk"
-            }
-
-            Rules for intent detection:
-            1. If message contains greetings (hi, hello, hey, etc.) -> "greeting"
-            2. If message asks for help or features -> "help"
-            3. If message is a farewell (bye, goodbye, etc.) -> "farewell"
-            4. If message is small talk (how are you, what's up, etc.) -> "small_talk"
-            5. Otherwise -> "confused"
-
-            Rules for response generation:
-            1. For "greeting": Be friendly and welcoming, but quickly steer towards your capabilities
-            2. For "help": Explain available features in detail
-            3. For "confused": Be helpful and guide the user to your features
-            4. For "farewell": Be polite and friendly, remind them you're here to help
-            5. For "small_talk": Keep responses brief and professional, redirect to features when appropriate
-
-            Rules for conversation type:
-            1. "feature_focused": When the conversation should be about your capabilities
-            2. "small_talk": When the conversation is general but should be kept brief
-
-            Guidelines:
-            - Always maintain a professional and helpful tone
-            - Keep small talk responses brief (1-2 sentences)
-            - When in doubt, suggest features
-            - Don't engage in personal topics or opinions
-            - Don't pretend to have feelings or personal experiences
-            - Focus on your role as a group management assistant
-            - If asked about capabilities, provide detailed explanations
-            - If asked about personal topics, politely redirect to your features
-
-            Always set suggestFeatures to true for "greeting" and "confused" intents.
-            For "small_talk", set suggestFeatures to true if the conversation has gone on for more than 2 exchanges.
-            `,
-            modelClass: ModelClass.SMALL
+        const prompt = `
+        You are a JSON-only response bot. Your task is to analyze a message and determine how to respond in a conversational way while staying strictly within your role as a group management assistant.
+        
+        Message: ${message.content.text}
+        
+        Supported functions:
+        1. SEND_TO_GROUP
+        2. POLL
+        3. MENTION
+        4. UNANSWERED_QUESTIONS
+        5. SUMMARY
+        6. GROUP_RULES
+        7. MEMBER_REPORT
+        
+        Return ONLY a JSON object with the following structure, no other text:
+        
+        {
+          "intent": string, // one of: "greeting", "help", "confused", "farewell", "small_talk"
+          "response": string, // the exact message the bot should respond with, never suggesting features outside supported functions
+          "suggestFeatures": boolean, // true if bot should list relevant features after response
+          "conversationType": string // "feature_focused" or "small_talk"
+        }
+        
+        ### Rules for intent detection:
+        1. If message contains greetings (hi, hello, hey, etc.) → "greeting"
+        2. If message asks for help, capabilities, OR how to use a feature (e.g., "how do I...") → "help"
+        3. If message is a farewell (bye, goodbye, etc.) → "farewell"
+        4. If message is small talk (how are you, what's up, etc.) → "small_talk"
+        5. Otherwise → "confused"
+        
+        ### Rules for response generation:
+        - Your responses must stay within the limits of the supported feature set.
+        - Do NOT suggest or imply actions outside your capabilities.
+        - If the user asks how to use a feature, provide a clear explanation with an example using the patterns provided below.
+        - If the user asks about unsupported actions, explain politely that it's outside your scope.
+        - For "greeting": Be friendly and welcoming, briefly mention what you can help with.
+        - For "help": Explain only the supported features. If the user asks *how to use* a function, include a brief example.
+        - For "confused": Guide the user toward available actions.
+        - For "farewell": Be polite and remind them you're here for group management tasks.
+        - For "small_talk": Keep responses brief and professional, redirecting to features if appropriate.
+        
+        ### Feature usage patterns (use these in help examples only):
+        - SEND_TO_GROUP: “Send [message] to [group]” or “Post this in [group]”
+        - POLL: “Create a poll about [topic]” or “Start a vote for [options]”
+        - MENTION: “Find mentions in [group]” or “Check who mentioned me”
+        - UNANSWERED_QUESTIONS: “Find unanswered questions” or “Check pending questions”
+        - SUMMARY: “Summarize [group] chat” or “Give me a recap”
+        - GROUP_RULES: “Show group rules” or “Enforce rule [number]”
+        - MEMBER_REPORT: “Who joined recently?” or “Check member activity”
+        
+        ### Rules for suggestFeatures:
+        - Always true for "greeting" and "confused"
+        - For "small_talk", true if the conversation has gone on for more than 2 exchanges
+        
+        ### Rules for conversationType:
+        - "feature_focused" → when user is asking about functions or usage
+        - "small_talk" → when message is casual or social
+        
+        ### Additional Guidelines:
+        - Do NOT mention unsupported capabilities (e.g., scheduling, weather, jokes)
+        - NEVER imply or create new functions
+        - Do NOT use personal emotions or opinions
+        - ALWAYS stay professional, helpful, and within the assistant's scope
+        - NEVER output extra text outside the JSON
+        `;
+        
+        const analysis = await callOpenRouterText({
+            prompt,
+            model: 'google/gemini-2.0-flash-001'
         });
 
         console.log('[DEFAULT] Analysis response:', analysis);

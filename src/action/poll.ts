@@ -12,7 +12,7 @@ import {Update, CallbackQuery} from "telegraf/types";
 import redis from "../redis/redis.ts";
 import {POLL_CONSTANTS} from "../telegram/constants.ts";
 import {getGroupsByUserId} from "./utils.ts";
-
+import { callOpenRouterText } from './utils.ts';
 interface Poll {
     id: string;
     question: string;
@@ -223,28 +223,63 @@ export const pollAction: Action = {
             }
         }
 
+        const recentMessages = await runtime.messageManager.getMemories({
+            roomId: message.roomId,
+            count: 10
+        });
         console.log('[POLL] Analyzing message for specific action');
-        const analysis = await generateText({
-            runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze a message in the context of poll management.
-            Message: ${message.content.text}
-            Available groups: ${groupInfos.map(g => g.title).join(', ')}
-            
-            Return ONLY a JSON object with the following structure, no other text:
-            {
-                "pollType": string, // "create", "results", "close", "list"
-                "targetGroup": string, // name of the group (if specified)
-                "pollDetails": { // only if pollType is "create"
-                    "question": string,
-                    "options": string[]
-                },
-                "pollId": string, // only if pollType is "results" or "close"
-                "response": string // the exact message the bot should respond with
-            }`,
-            modelClass: ModelClass.SMALL
+        const prompt = `
+        You are a strict JSON-only response bot that manages polls in group conversations. Your task is to analyze a message and respond with a valid JSON object following the rules below. DO NOT include any natural language or explanation — only the JSON.
+        
+        ### Context:
+        - Recent conversation history (for reference): 
+        ${recentMessages.map(m => m.content.text).join('\n')}
+        
+        - Current message: 
+        ${message.content.text}
+        
+        - Available groups: 
+        ${groupInfos.map(g => g.title).join(', ')}
+        
+        ### Instructions:
+        Based on the current message and recent conversation, infer the user's intent and return one of the following pollTypes:
+        
+        - "create" — The user is trying to create a new poll.
+        - "results" — The user is asking for results of a specific poll.
+        - "close" — The user wants to close an existing poll.
+        - "list" — The user wants to list all polls (active or historical).
+        
+        ### Output Format:
+        Return ONLY a valid JSON object with this exact structure:
+        
+        {
+          "pollType": "create" | "results" | "close" | "list",
+          "targetGroup": string | null, // name of the group if mentioned; otherwise null
+          "pollDetails": {
+            "question": string,
+            "options": string[]
+          } | null, // required only for "create"
+          "pollId": string | null, // required only for "results" and "close"
+          "response": string // a human-readable response the bot should send back
+        }
+        
+        ### Rules & Constraints:
+        - All fields must be present. If a field is not applicable for the pollType, return null.
+        - Use null instead of omitting fields.
+        - Do not invent group names or poll IDs — only use what's provided or infer from the message if explicitly mentioned.
+        - If necessary information is missing (e.g., question or options for create), return pollType: "create", but leave "pollDetails" fields as null and write a helpful message in "response" explaining what is missing.
+        - Your response must be VALID JSON. No trailing commas, no additional text, no Markdown formatting.
+        - DO NOT guess intent if the message is unclear — return pollType: "list" by default with a response asking for clarification.
+        `;
+
+
+        console.log(prompt)
+        const analysis = await callOpenRouterText({
+            prompt: prompt,
+            model: 'google/gemini-2.0-flash-001'
         });
 
-        await runtime.messageManager.createMemory({
+        runtime.messageManager.createMemory({
             content: {
                 text: message.content.text
             },
@@ -278,7 +313,7 @@ export const pollAction: Action = {
                 if (!targetGroup) {
                     console.log('[POLL] Target group not found:', result.targetGroup);
                     const groupNotFoundResponse = {
-                        text: `${result.response}`,
+                        text: `What group would you like to create the poll in?`,
                         action: "POLL"
                     };
                     await callback(groupNotFoundResponse);

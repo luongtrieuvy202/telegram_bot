@@ -10,7 +10,7 @@ import {
 
 
 import redis from "../redis/redis.ts";
-import {getUserGroupMessages, getGroupsByUserId, extractJsonFromResponse} from "./utils.ts";
+import {getUserGroupMessages, getGroupsByUserId, extractJsonFromResponse, callOpenRouterText} from "./utils.ts";
 import {Context} from "telegraf";
 import {Update} from "telegraf/types";
 
@@ -50,9 +50,7 @@ export const summaryAction: Action = {
         console.log('[SUMMARY] Found groups:', groupInfos.map(g => g.title).join(', '));
 
         console.log('[SUMMARY] Analyzing message for specific action');
-        const analysis = await generateText({
-            runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze a message in the context of summarizing group messages.
+        const promt = `You are a JSON-only response bot. Your task is to analyze a message in the context of summarizing group messages.
             
             Recent conversation:
             ${recentMessages.map(m => m.content.text).join('\n')}
@@ -74,8 +72,11 @@ export const summaryAction: Action = {
             - If the user has been asking for summaries repeatedly, provide more detailed responses
             - If the user has been canceling frequently, be more explicit about the cancelation
             - If the user has been asking about specific topics, focus the summary on those topics
-            `,
-            modelClass: ModelClass.SMALL
+            `
+
+        const analysis = await callOpenRouterText({
+            prompt: promt,
+            model: 'google/gemini-2.0-flash-001'
         });
 
         console.log('[SUMMARY] Handler analysis response:', analysis);
@@ -90,7 +91,7 @@ export const summaryAction: Action = {
             return;
         }
 
-        await runtime.messageManager.createMemory({
+        runtime.messageManager.createMemory({
           content: {
               text: message.content.text
           },
@@ -161,10 +162,9 @@ export const summaryAction: Action = {
                 ${parsedLastMessages.map(m => `${m.username || 'Unknown'}: ${m.text}`).join('\n')}`;
 
                 console.log('[SUMMARY] Generating summary with AI');
-                const summary = await generateText({
-                    runtime,
-                    context: summaryPrompt,
-                    modelClass: ModelClass.LARGE
+                const summary = await callOpenRouterText({
+                    prompt: summaryPrompt,
+                    model: 'nousresearch/hermes-3-llama-3.1-405b'
                 });
 
                 console.log('[SUMMARY] Generated summary text');
@@ -215,10 +215,9 @@ export const summaryAction: Action = {
                         ${messages.map(m => `${m.username || 'Unknown'}: ${m.text}`).join('\n')}`;
 
                         console.log('[SUMMARY] Generating summary for group:', (groupData as any).groupInfo.title);
-                        const summary = await generateText({
-                            runtime,
-                            context: summaryPrompt,
-                            modelClass: ModelClass.LARGE
+                        const summary = await callOpenRouterText({
+                            prompt: summaryPrompt,
+                            model: 'nousresearch/hermes-3-llama-3.1-405b'
                         });
 
                         allSummaries.push({

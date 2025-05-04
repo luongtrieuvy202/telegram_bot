@@ -12,6 +12,7 @@ import {getGroupsByUserId} from "./utils.ts";
 import redis from "../redis/redis.ts";
 import {generateText} from "@elizaos/core";
 import { SendToGroupState, GroupInfo, createMemory } from "./types.ts";
+import { callOpenRouterText } from './utils.ts';
 
 // State Management
 async function getSendToGroupState(runtime: IAgentRuntime, roomId: string): Promise<SendToGroupState | null> {
@@ -208,7 +209,7 @@ export const sendToGroupAction: Action = {
         // Get recent messages and available groups
         const recentMessages = await runtime.messageManager.getMemories({
             roomId: message.roomId,
-            count: 5
+            count: 10
         });
 
         const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
@@ -304,31 +305,57 @@ export const sendToGroupAction: Action = {
         }
 
         // Analyze message intent
-        const analysis = await generateText({
-            runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze a message in the context of sending a message to a group.
-            
-            Recent conversation:
-            ${recentMessages.map(m => m.content.text).join('\n')}
-            
-            Current message: ${message.content.text}
-            Available groups: ${typedGroupInfos.map(g => g.title).join(', ')}
-            
-            Important: If the user is sending a new message, ignore any previous message state and treat it as a fresh request.
-            
-            Return ONLY a JSON object with the following structure, no other text:
-            {
-                "intent": string, // "send_message", "select_group", "provide_message", "edit_message", "change_group", "cancel"
-                "extractedGroup": string, // group name (not ID), must match one of the available groups or "all" for all groups
-                "extractedMessage": string, // message content if provided
-                "isEdit": boolean, // true if user wants to edit the message
-                "isGroupChange": boolean, // true if user wants to change the group
-                "response": string // the exact message the bot should respond with
-            }`,
-            modelClass: ModelClass.SMALL
+        const prompt = `
+        You are a JSON-only response bot. Your task is to help users send messages to groups in a step-by-step way, handling group selection, message content, edits, and cancellations.
+        
+        ### Context:
+        Recent conversation:
+        ${recentMessages.map(m => m.content.text).join('\n')}
+        
+        Current message:
+        ${message.content.text}
+        
+        Available groups:
+        ${typedGroupInfos.map(g => g.title).join(', ')}
+        
+        ### Behavior Rules:
+        - You MUST follow a step-by-step approach: first determine the target group, then collect the message content, and finally allow editing or confirmation.
+        - If the group is specified but message content is missing, respond with intent: "provide_message" and prompt the user for the message.
+        - If both group and message are provided, return intent: "send_message".
+        - If the user wants to change the group after selecting one, set intent: "change_group".
+        - If the user wants to edit a previously provided message, use intent: "edit_message".
+        - If the user wants to cancel the operation, use intent: "cancel".
+        - If only the group is mentioned, extractedMessage should be null.
+        - If only a message is mentioned, extractedGroup should be null unless it's clearly directed at a group.
+        
+        ### Output Format:
+        Return ONLY a valid JSON object in this exact structure (no extra text):
+        
+        {
+          "intent": "send_message" | "select_group" | "provide_message" | "edit_message" | "change_group" | "cancel",
+          "extractedGroup": string | null, // Must match an available group title or be "all" if specified
+          "extractedMessage": string | null, // Only include if the user clearly provided it
+          "isEdit": boolean, // True if editing a previously provided message
+          "isGroupChange": boolean, // True if user is switching to a different group
+          "response": string // Human-readable message the bot should reply with
+        }
+        
+        ### Validation & Constraints:
+        - Do NOT hallucinate missing information.
+        - If the message is incomplete, ask for what's missing instead of making assumptions.
+        - Always return null for extractedGroup or extractedMessage if that information isn't clearly provided.
+        - Respond with intent: "provide_message" and a helpful prompt if group is known but message content is not.
+        - Respond with intent: "select_group" if no valid group is mentioned.
+        - Ensure JSON is strictly valid: no extra commas, text, or markdown.
+        
+        `;
+
+        const analysis = await callOpenRouterText({
+            prompt,
+            model: 'google/gemini-2.0-flash-001'
         });
 
-        await createMemory(runtime, message, {
+        createMemory(runtime, message, {
             text: message.content.text,
             action: "SEND_TO_GROUP"
         }, false);

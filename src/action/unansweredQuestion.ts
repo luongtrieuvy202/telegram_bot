@@ -9,7 +9,7 @@ import {
 } from "@elizaos/core";
 import {Context} from "telegraf";
 import {Update} from "telegraf/types";
-import {getGroupsByUserId, getUserGroupMessages, extractJsonFromResponse} from "./utils.ts";
+import {getGroupsByUserId, getUserGroupMessages, extractJsonFromResponse, callOpenRouterText} from "./utils.ts";
 import redis from "../redis/redis.ts";
 
 
@@ -48,9 +48,7 @@ export const unansweredQuestionAction: Action = {
         console.log('[UNANSWERED_QUESTIONS] Found groups:', groupInfos.map(g => g.title).join(', '));
 
         console.log('[UNANSWERED_QUESTIONS] Analyzing message for specific action');
-        const analysis = await generateText({
-            runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze a message in the context of finding unanswered questions.
+        const promt =  `You are a JSON-only response bot. Your task is to analyze a message in the context of finding unanswered questions.
             
             Recent conversation:
             ${recentMessages.map(m => m.content.text).join('\n')}
@@ -73,8 +71,11 @@ export const unansweredQuestionAction: Action = {
             - If the user has been canceling frequently, be more explicit about the cancelation
             - If the user has been asking about specific topics, focus on questions related to those topics
             - If the user has been asking about specific users, prioritize their questions
-            `,
-            modelClass: ModelClass.SMALL
+            `;
+
+        const analysis = await callOpenRouterText({
+            prompt: promt,
+            model: 'google/gemini-2.0-flash-001'
         });
 
         console.log('[UNANSWERED_QUESTIONS] Handler analysis response:', analysis);

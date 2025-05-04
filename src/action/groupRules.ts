@@ -13,7 +13,7 @@ import {Context} from "telegraf";
 import {Update} from "telegraf/types";
 
 import redis from "../redis/redis.ts";
-import {getGroupsByUserId, extractJsonFromResponse} from "./utils.ts";
+import {getGroupsByUserId, extractJsonFromResponse, callOpenRouterText} from "./utils.ts";
 
 interface RuleCondition {
     type: 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'matches_regex' | 'length_greater' | 'length_less';
@@ -202,10 +202,9 @@ export const groupRulesAction: Action = {
                 "duration": 60
             }`;
 
-            const response = await generateText({
-                runtime,
-                context: prompt,
-                modelClass: ModelClass.SMALL
+            const response = await callOpenRouterText({
+                prompt,
+                model: 'google/gemini-2.0-flash-001'
             });
 
             await runtime.messageManager.createMemory({

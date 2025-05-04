@@ -12,7 +12,7 @@ import {
 import redis from "../redis/redis.ts";
 import {Context, Telegraf} from "telegraf";
 import {Update} from "telegraf/types";
-import {checkMentionTimeouts, handleUnrespondedMentions, getGroupsByUserId, getUserGroupMessages} from "./utils.ts";
+import {checkMentionTimeouts, handleUnrespondedMentions, getGroupsByUserId, getUserGroupMessages, callOpenRouterText} from "./utils.ts";
 
 export const autoMention: Action = {
     name: 'MENTION_AUTO',
@@ -60,12 +60,15 @@ export const mentionAction: Action = {
     similes: ['mention', 'tag', 'notify'],
     description: "Get messages where you were mentioned",
     validate: async (runtime: IAgentRuntime, message: Memory, state?: State) => {
-        console.log('[MENTION] Starting validation check');
+        const startTime = Date.now();
+        console.info(`[MENTION] Starting validation check at ${new Date().toISOString()}`);
+        
         if (!state?.handle) {
-            console.log('[MENTION] Validation failed: No state handle found');
+            console.info(`[MENTION] Validation failed: No state handle found. Time taken: ${Date.now() - startTime}ms`);
             return false;
         }
 
+        console.info(`[MENTION] Validation successful. Time taken: ${Date.now() - startTime}ms`);
         return true;
     },
     suppressInitialMessage: true,
@@ -76,23 +79,26 @@ export const mentionAction: Action = {
         options?: any,
         callback?: HandlerCallback
     ): Promise<void> => {
-        console.log('[MENTION] Starting handler execution');
+        const totalStartTime = Date.now();
+        console.info(`[MENTION] Starting handler execution at ${new Date().toISOString()}`);
         const ctx = options.ctx as Context<Update>;
 
-        console.log('[MENTION] Fetching recent messages for context');
+        const fetchStartTime = Date.now();
+        console.info(`[MENTION] Fetching recent messages for context`);
         const recentMessages = await runtime.messageManager.getMemories({
             roomId: message.roomId,
             count: 5
         });
+        console.info(`[MENTION] Fetched recent messages in ${Date.now() - fetchStartTime}ms`);
 
-        console.log('[MENTION] Fetching user groups from Redis');
+        const groupStartTime = Date.now();
+        console.info(`[MENTION] Fetching user groups from Redis`);
         const [groupIds, groupInfos] = await getGroupsByUserId(ctx.from.id.toString());
-        console.log('[MENTION] Found groups:', groupInfos.map(g => g.title).join(', '));
+        console.info(`[MENTION] Found ${groupInfos.length} groups in ${Date.now() - groupStartTime}ms:`, groupInfos.map(g => g.title).join(', '));
 
-        console.log('[MENTION] Analyzing message for specific action');
-        const analysis = await generateText({
-            runtime,
-            context: `You are a JSON-only response bot. Your task is to analyze a message in the context of finding mentions.
+        const analysisStartTime = Date.now();
+        console.info(`[MENTION] Starting message analysis`);
+        const prompt = `You are a JSON-only response bot. Your task is to analyze a message in the context of finding mentions.
             
             Recent conversation:
             ${recentMessages.map(m => m.content.text).join('\n')}
@@ -126,12 +132,16 @@ export const mentionAction: Action = {
             - Consider the recent conversation context when determining intent
             - If the user has been discussing a specific group, prioritize that group
             - If the user has been asking about mentions repeatedly, provide more detailed responses
-            - If the user has been canceling frequently, be more explicit about the cancelation
-            `,
-            modelClass: ModelClass.SMALL
+            - If the user has been canceling frequently, be more explicit about the cancelation`
+        
+        
+            const analysis = await callOpenRouterText({
+            prompt,
+            model: 'google/gemini-2.0-flash-001'
         });
+        console.info(`[MENTION] Message analysis completed in ${Date.now() - analysisStartTime}ms`);
 
-        console.log('[MENTION] Handler analysis response:', analysis);
+        console.info(`[MENTION] Handler analysis response:`, analysis);
 
         const result = extractJsonFromResponse(analysis);
         if (!result) {
@@ -143,7 +153,7 @@ export const mentionAction: Action = {
             return;
         }
 
-        console.log('[MENTION] Processing intent:', result.intent);
+        console.info(`[MENTION] Processing intent: ${result.intent}`);
 
         const targetGroup = groupInfos.find(group =>
             group.title?.toLowerCase() === result.targetGroup?.toLowerCase()
@@ -151,9 +161,10 @@ export const mentionAction: Action = {
 
         switch (result.intent) {
             case 'find_specific':
-                console.log('[MENTION] Processing find_specific intent for group:', result.targetGroup);
+                const specificStartTime = Date.now();
+                console.info(`[MENTION] Processing find_specific intent for group: ${result.targetGroup}`);
                 if (!targetGroup) {
-                    console.log('[MENTION] Target group not found:', result.targetGroup);
+                    console.info(`[MENTION] Target group not found: ${result.targetGroup}`);
                     await callback({
                         text: result.response || `I couldn't find the group "${result.targetGroup}". Here are the groups you have access to:\n${groupInfos.map(g => g.title).join('\n')}`,
                         action: "MENTION"
@@ -161,12 +172,12 @@ export const mentionAction: Action = {
                     return;
                 }
 
-                console.log('[MENTION] Fetching messages for group:', targetGroup.title);
-                // Get message IDs from sorted set
+                const messageFetchStartTime = Date.now();
+                console.info(`[MENTION] Fetching messages for group: ${targetGroup.title}`);
                 const messageIds = await redis.zrevrange(`group:${targetGroup.id}:messages`, 0, -1);
-                console.log('[MENTION] Found message IDs:', messageIds);
+                console.info(`[MENTION] Found ${messageIds.length} message IDs in ${Date.now() - messageFetchStartTime}ms`);
 
-                // Get message contents from hashes
+                const messageProcessStartTime = Date.now();
                 const messages = [];
                 for (const messageId of messageIds) {
                     const messageData = await redis.hgetall(`group:${targetGroup.id}:message:${messageId}`);
@@ -174,15 +185,16 @@ export const mentionAction: Action = {
                         messages.push(messageData);
                     }
                 }
+                console.info(`[MENTION] Processed ${messages.length} messages in ${Date.now() - messageProcessStartTime}ms`);
 
                 const mentions = messages.filter(msg =>
                     msg.text && msg.text.includes(`@${ctx.from.username}`)
                 );
 
-                console.log('[MENTION] Found mentions:', mentions.length);
+                console.info(`[MENTION] Found ${mentions.length} mentions in ${Date.now() - specificStartTime}ms`);
 
                 if (mentions.length === 0) {
-                    console.log('[MENTION] No mentions found');
+                    console.info(`[MENTION] No mentions found`);
                     await callback({
                         text: `No mentions found in ${targetGroup.title}.`,
                         action: "MENTION"
@@ -194,20 +206,18 @@ export const mentionAction: Action = {
                     `${index + 1}. Message: "${m.text}"\n   From: ${m.username || 'Unknown'}\n   Posted: ${new Date(m.date).toLocaleString()}\n`
                 ).join('\n');
 
-                console.log('[MENTION] Generated response text for', mentions.length, 'mentions');
+                console.info(`[MENTION] Generated response text for ${mentions.length} mentions`);
 
-                // Remove mentioned messages from Redis
+                const cleanupStartTime = Date.now();
                 for (const mention of mentions) {
-                    console.log('[MENTION] Removing mention from Redis:', JSON.stringify(mention));
+                    console.info(`[MENTION] Removing mention from Redis:`, JSON.stringify(mention));
                     
-                    // Remove from sorted set
                     await redis.zrem(`group:${targetGroup.id}:messages`, mention.id);
-                    
-                    // Remove from hash
                     await redis.del(`group:${targetGroup.id}:message:${mention.id}`);
                     
-                    console.log('[MENTION] Removed mention with ID:', mention.id);
+                    console.info(`[MENTION] Removed mention with ID: ${mention.id}`);
                 }
+                console.info(`[MENTION] Cleanup completed in ${Date.now() - cleanupStartTime}ms`);
 
                 await callback({
                     text: `📋 *Mentions in ${targetGroup.title}*\n\n${mentionsText}\n\nTotal: ${mentions.length} mention${mentions.length === 1 ? '' : 's'}\n\nThese mentions have been removed from the list.`,
@@ -216,10 +226,12 @@ export const mentionAction: Action = {
                 break;
 
             case 'find_all':
-                console.log('[MENTION] Processing find_all intent');
+                const allStartTime = Date.now();
+                console.info(`[MENTION] Processing find_all intent`);
                 const allResponses = await getUserGroupMessages(ctx.message.from.id);
-                console.log('[MENTION] Fetched messages from', Object.keys(allResponses).length, 'groups');
+                console.info(`[MENTION] Fetched messages from ${Object.keys(allResponses).length} groups in ${Date.now() - allStartTime}ms`);
 
+                const processStartTime = Date.now();
                 const allMentions = [];
                 const mentionsToRemove = [];
 
@@ -229,20 +241,20 @@ export const mentionAction: Action = {
                     );
 
                     if (mentions.length > 0) {
-                        console.log('[MENTION] Found', mentions.length, 'mentions in group:', (groupData as any).groupInfo.title);
+                        console.info(`[MENTION] Found ${mentions.length} mentions in group: ${(groupData as any).groupInfo.title}`);
                         allMentions.push({
                             group: (groupData as any).groupInfo.title,
                             mentions: mentions.map((m, index) =>
                                 `${index + 1}. Message: "${m.text}"\n   From: ${m.username || 'Unknown'}\n   Posted: ${new Date(m.date).toLocaleString()}\n`
                             ).join('\n')
                         });
-                        // Store mentions for removal
                         mentionsToRemove.push(...mentions.map(m => ({ groupId, message: m })));
                     }
                 }
+                console.info(`[MENTION] Processed all groups in ${Date.now() - processStartTime}ms`);
 
                 if (allMentions.length === 0) {
-                    console.log('[MENTION] No mentions found in any group');
+                    console.info(`[MENTION] No mentions found in any group`);
                     await callback({
                         text: "✅ No mentions found in any of your groups.",
                         action: "MENTION"
@@ -257,20 +269,18 @@ export const mentionAction: Action = {
                 const totalMentions = allMentions.reduce((sum, group) => 
                     sum + group.mentions.split('\n').filter(line => line.includes('Message:')).length, 0);
 
-                console.log('[MENTION] Generated response for', totalMentions, 'mentions across', allMentions.length, 'groups');
+                console.info(`[MENTION] Generated response for ${totalMentions} mentions across ${allMentions.length} groups`);
 
-                // Remove all mentioned messages from Redis
+                const allCleanupStartTime = Date.now();
                 for (const { groupId, message } of mentionsToRemove) {
-                    console.log('[MENTION] Removing mention from Redis:', JSON.stringify(message));
+                    console.info(`[MENTION] Removing mention from Redis:`, JSON.stringify(message));
                     
-                    // Remove from sorted set
                     await redis.zrem(`group:${groupId}:messages`, message.id);
-                    
-                    // Remove from hash
                     await redis.del(`group:${groupId}:message:${message.id}`);
                     
-                    console.log('[MENTION] Removed mention with ID:', message.id);
+                    console.info(`[MENTION] Removed mention with ID: ${message.id}`);
                 }
+                console.info(`[MENTION] Cleanup completed in ${Date.now() - allCleanupStartTime}ms`);
 
                 await callback({
                     text: `📋 *All Mentions Summary*\n\n${allMentionsText}\n\nTotal: ${totalMentions} mention${totalMentions === 1 ? '' : 's'} across ${allMentions.length} group${allMentions.length === 1 ? '' : 's'}\n\nThese mentions have been removed from the list.`,
@@ -279,7 +289,7 @@ export const mentionAction: Action = {
                 break;
 
             case 'cancel':
-                console.log('[MENTION] Processing cancel intent');
+                console.info(`[MENTION] Processing cancel intent`);
                 await callback({
                     text: result.response || "Mention search cancelled. Let me know if you'd like to try again.",
                     action: "MENTION"
@@ -287,13 +297,13 @@ export const mentionAction: Action = {
                 break;
 
             default:
-                console.log('[MENTION] Unknown intent:', result.intent);
+                console.info(`[MENTION] Unknown intent: ${result.intent}`);
                 await callback({
                     text: result.response || "I'm not sure what you'd like to do. Please specify a group or say 'all' to check all groups.",
                     action: "MENTION"
                 });
         }
-        console.log('[MENTION] Handler execution completed');
+        console.info(`[MENTION] Handler execution completed in ${Date.now() - totalStartTime}ms`);
     },
     examples: [],
 } as Action

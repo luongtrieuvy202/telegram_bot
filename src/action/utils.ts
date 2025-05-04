@@ -454,5 +454,44 @@ export async function filterImportantMentions(mentionMessages) {
     }
 }
 
+/**
+ * Calls the OpenRouter API to generate text based on a prompt and model.
+ * @param {Object} params
+ * @param {string} params.prompt - The prompt to send to the model.
+ * @param {string} params.model - The model to use (e.g., 'openai/gpt-3.5-turbo').
+ * @param {string} [params.apiKey] - Optional API key (defaults to process.env.OPENROUTER_API_KEY).
+ * @returns {Promise<string>} - The generated text, or empty string on error.
+ */
+export async function callOpenRouterText({ prompt, model, apiKey }: { prompt: string, model: string, apiKey?: string }): Promise<any> {
+    const key = apiKey || process.env.OPENROUTER_API_KEY;
+    if (!key) {
+        console.error('[OpenRouter] API key is not set.');
+        return '';
+    }
+    let start = Date.now();
+    try {
+        const fetchResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${key}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                model,
+                messages: [{ role: 'user', content: prompt }]
+            })
+        });
+        const elapsed = Date.now() - start;
+        console.log(`[OpenRouter] API call took ${elapsed}ms`);
+        const data = await fetchResponse.json();
+        return data.choices[0].message.content;
+    } catch (error) {
+        const elapsed = Date.now() - start;
+        console.log(`[OpenRouter] API call failed after ${elapsed}ms`);
+        console.error('[OpenRouter] API error:', error);
+        return '';
+    }
+}
+
 
   

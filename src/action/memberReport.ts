@@ -2,7 +2,7 @@ import {Action, IAgentRuntime, Memory, State, HandlerCallback, generateText, Mod
 import redis from "../redis/redis.ts";
 import {Context} from "telegraf";
 import {Update} from "telegraf/types";
-import {getGroupsByUserId} from "./utils.ts";
+import {getGroupsByUserId, callOpenRouterText} from "./utils.ts";
 
 // Redis key patterns:
 // group:{groupId}:new_members:{timestamp} -> hash containing member info
@@ -128,10 +128,9 @@ Example responses:
 
 Do not include any other text or explanation. Only return the JSON object.`;
 
-    const response = await generateText({
-        runtime,
-        context: intentPrompt,
-        modelClass: ModelClass.SMALL
+    const response = await callOpenRouterText({
+        prompt: intentPrompt,
+        model: 'google/gemini-2.0-flash-001'
     });
 
     console.log('Intent analysis response:', response);

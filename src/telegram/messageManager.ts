@@ -38,6 +38,7 @@ import {
 import fs from "fs";
 import {message} from 'telegraf/filters';
 import redis from "../redis/redis.ts";
+import { callOpenRouterText, extractJsonFromResponse } from '../action/utils.ts';
 
 enum MediaType {
     PHOTO = "photo",
@@ -1468,43 +1469,65 @@ export class MessageManager {
 
             if (shouldRespond) {
                 // Start typing effect
-                await this._startTypingEffect(ctx);
+                this._startTypingEffect(ctx);
 
                 // Send processing message
                 const processingMessageId = await this._sendProcessingMessage(ctx);
 
                 try {
+                    const startTime = Date.now();
+                    console.info(`[Action Processing] Starting action analysis at ${new Date().toISOString()}`);
+
                     // First, analyze the message for potential actions
                     const analysis = await this._analyzeMessageForActions(memory, state);
                     
-                    console.log(analysis)
+                    console.info(`[Action Processing] Analysis completed in ${Date.now() - startTime}ms`);
+                    console.info(`[Action Processing] Analysis result:`, analysis);
 
                     let handled = false;
 
                     if (!analysis.needsFullValidation && analysis.potentialActions.length > 0) {
                         // Try the identified actions first
                         for (const actionName of analysis.potentialActions) {
+                            const actionStartTime = Date.now();
+                            console.info(`[Action Processing] Attempting action: ${actionName} at ${new Date().toISOString()}`);
+
                             const action = this.runtime.actions.find(a => a.name === actionName);
-                            if (!action) continue;
+                            if (!action) {
+                                console.info(`[Action Processing] Action ${actionName} not found`);
+                                continue;
+                            }
 
                             state.handle = true;
                             const shouldHandle = await action.validate(this.runtime, memory, state);
                             
                             if (shouldHandle) {
+                                console.info(`[Action Processing] Action ${actionName} validation passed, executing handler`);
                                 await action.handler(this.runtime, memory, state, { ctx }, callback);
                                 handled = true;
+                                console.info(`[Action Processing] Action ${actionName} completed in ${Date.now() - actionStartTime}ms`);
                                 break;
+                            } else {
+                                console.info(`[Action Processing] Action ${actionName} validation failed`);
                             }
                         }
                     }
 
                     // If still no action handled, use default action
                     if (!handled) {
+                        const defaultActionStartTime = Date.now();
+                        console.info(`[Action Processing] No specific action handled, attempting DEFAULT action at ${new Date().toISOString()}`);
+                        
                         const defaultAction = this.runtime.actions.find(a => a.name === "DEFAULT");
                         if (defaultAction) {
                             await defaultAction.handler(this.runtime, memory, state, { ctx }, callback);
+                            console.info(`[Action Processing] DEFAULT action completed in ${Date.now() - defaultActionStartTime}ms`);
+                        } else {
+                            console.info(`[Action Processing] DEFAULT action not found`);
                         }
                     }
+
+                    console.info(`[Action Processing] Total processing time: ${Date.now() - startTime}ms`);
                 } finally {
                     // Stop typing effect
                     await this._stopTypingEffect(ctx);
@@ -1534,8 +1557,6 @@ export class MessageManager {
             count: 4
         });
 
-        console.log(recentMessages)
-
         const context = {
             recentMessages: recentMessages.map(m => m.content.text).join('\n'),
             currentMessage: message.content.text,
@@ -1546,11 +1567,15 @@ export class MessageManager {
             }))
         };
 
-        console.log(context)
-
-        const analysis = await generateText({
-            runtime: this.runtime,
-            context: `You are an action analysis bot. Your task is to analyze a message and identify the SINGLE most likely action it might trigger.
+        const openRouterApiKey = process.env.OPENROUTER_API_KEY;
+        if (!openRouterApiKey) {
+            console.error('[ActionAnalysis] OpenRouter API key is not set.');
+            return {
+                potentialActions: [],
+                needsFullValidation: true
+            };
+        }
+        const prompt = `You are an action analysis bot. Your task is to analyze a message and identify the SINGLE most likely action it might trigger.
             
             Recent conversation:
             ${context.recentMessages}
@@ -1760,12 +1785,13 @@ export class MessageManager {
             1. Return ONLY the single highest confidence action in potentialActions
             2. Only include an action if its confidence is > 0.5
             3. If no action has confidence > 0.5, return an empty array and set needsFullValidation to true
-            4. If multiple actions have the same highest confidence, choose the one that best matches the current context`,
-            modelClass: ModelClass.SMALL
-        });
-
+            4. If multiple actions have the same highest confidence, choose the one that best matches the current context`;
         try {
-            const result = JSON.parse(analysis);
+            const analysis = await callOpenRouterText({
+                prompt,
+                model: 'google/gemini-2.0-flash-001'
+            }) as any;
+            const result = extractJsonFromResponse(analysis);
             return {
                 potentialActions: result.potentialActions,
                 needsFullValidation: result.needsFullValidation
@@ -1777,6 +1803,7 @@ export class MessageManager {
                 needsFullValidation: true
             };
         }
+
     }
 
     private async _startTypingEffect(ctx: Context): Promise<void> {
